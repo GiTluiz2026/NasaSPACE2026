@@ -34,11 +34,7 @@ let state = {
   lastResilience: { pragmatico: 91, financeiro: 72, blindagem: 96 },
   stacNoScene: false,
   agroShield: null,
-  lastFuturesCalc: null,
-  nasaAlertSituation: 'auto',
-  isCropSaved: false,
-  savedPlantingDateISO: null,
-  lastNasaAlerts: null
+  lastFuturesCalc: null
 };
 
 let experienceMode = 'produtor';
@@ -317,37 +313,18 @@ function updateCoordinatesAndFetchOrbital(lat, lon, polygonLatLngs, label, isCus
   state.lon = lon;
   state.isCustomLocation = isCustom;
   state.locationLabel = label;
-  state.liveSoilMoisturePct = null;
-  state.liveEtoToday = null;
-  state.liveTempMaxToday = null;
-  state.liveTempMin7d = null;
-  state.liveRainNext7d = undefined;
-  state.realtimeWeather = null;
-  state.realtimeSoil = null;
   document.getElementById('coords-display').textContent = `Lat: ${lat.toFixed(4)}° | Lon: ${lon.toFixed(4)}°`;
   if (isCustom) setSatellitesLoadingState();
   fetchNasaPowerClimatology(lat, lon);
   fetchPlanetaryComputerNDVI(polygonLatLngs || state.currentPolygon);
-  fetchRealtimeHydroAndSoil(lat, lon);
   updateHistoricalChart();
 }
 
 function getEffectiveOrbitalMetrics() {
   const preset = PRESETS[state.regionKey];
   const yrData = preset.history[state.selectedYear] || preset.history[2026];
-  const et0 = state.liveEtoToday ?? computeEt0HargreavesSamani(state.nasaTemp, state.nasaSolar);
+  const et0 = computeEt0HargreavesSamani(state.nasaTemp, state.nasaSolar);
   const waterBalance = computeWaterBalance(state.nasaRain, et0);
-
-  if (state.liveSoilMoisturePct !== undefined && state.liveSoilMoisturePct !== null) {
-    const normalizedBh = Math.max(-1.0, Math.min(1.0, waterBalance / 1200));
-    return {
-      smapMoisture: state.liveSoilMoisturePct,
-      smapDelta: Math.round((state.liveSoilMoisturePct - 22.0) * 3.2),
-      bareSoilDays: Math.round(Math.max(15, Math.min(220, 95 - (state.ndviCurrent * 85) - normalizedBh * 30))),
-      et0,
-      waterBalance
-    };
-  }
 
   if (!state.isCustomLocation) {
     return { smapMoisture: yrData.smap, smapDelta: preset.smapDelta, bareSoilDays: yrData.bare, et0, waterBalance };
@@ -370,25 +347,21 @@ function getEffectiveOrbitalMetrics() {
 // ============================================================================
 function updateDiagnosticUI() {
   const eff = getEffectiveOrbitalMetrics();
-  const solarVal = state.liveSolarToday ?? state.nasaSolar;
 
-  document.getElementById('metric-solar').textContent = `${solarVal.toFixed(1)} MJ`;
+  document.getElementById('metric-solar').textContent = `${state.nasaSolar.toFixed(1)} MJ`;
   document.getElementById('metric-et0').textContent = `${eff.et0.toFixed(2)} mm/d`;
   document.getElementById('metric-bh').textContent = `${eff.waterBalance >= 0 ? '+' : ''}${eff.waterBalance} mm`;
 
   const smapVal = eff.smapMoisture;
-  const pctCad = state.agroShield ? state.agroShield.pctCad : Math.max(15, Math.min(95, Math.round((smapVal / 30) * 100)));
-  const isDryRoot = pctCad <= 50 || smapVal < 15;
-  const isMediumRoot = !isDryRoot && (pctCad < 65 || smapVal < 20);
-
-  document.getElementById('fg-water-bar').style.width = `${Math.max(10, Math.min(98, pctCad))}%`;
-  document.getElementById('fg-water-bar').className = `h-full rounded-full transition-all duration-500 ${isDryRoot ? 'bg-rose-500' : (isMediumRoot ? 'bg-amber-500' : 'bg-emerald-500')}`;
-  document.getElementById('fg-water-status').textContent = isDryRoot
-    ? `Terra Seca (${smapVal}% vol • ${pctCad}% CAD)`
-    : (isMediumRoot ? `Umidade Média (${smapVal}% vol • ${pctCad}% CAD)` : `Boa Umidade (${smapVal}% vol • ${pctCad}% CAD)`);
+  const smapPct = Math.max(10, Math.min(95, Math.round((smapVal / 32) * 100)));
+  document.getElementById('fg-water-bar').style.width = `${smapPct}%`;
+  document.getElementById('fg-water-bar').className = `h-full rounded-full transition-all duration-500 ${smapVal < 16 ? 'bg-rose-500' : (smapVal < 22 ? 'bg-amber-500' : 'bg-emerald-500')}`;
+  document.getElementById('fg-water-status').textContent = smapVal < 16
+    ? `Terra Seca (${smapVal}%)`
+    : (smapVal < 22 ? `Umidade Média (${smapVal}%)` : `Boa Umidade (${smapVal}%)`);
   const wPill = document.getElementById('fg-water-pill');
-  wPill.textContent = isDryRoot ? 'Alerta' : (isMediumRoot ? 'Atenção' : 'Ótimo');
-  wPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${isDryRoot ? 'bg-rose-200 text-rose-950' : (isMediumRoot ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200 text-emerald-950')}`;
+  wPill.textContent = smapVal < 16 ? 'Alerta' : (smapVal < 22 ? 'Atenção' : 'Ótimo');
+  wPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${smapVal < 16 ? 'bg-rose-200 text-rose-950' : (smapVal < 22 ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200 text-emerald-950')}`;
 
   const ndviPct = Math.max(8, Math.min(98, Math.round(state.ndviCurrent * 100)));
   const ndviBar = document.getElementById('fg-ndvi-bar');
@@ -396,22 +369,19 @@ function updateDiagnosticUI() {
   ndviBar.className = `h-full rounded-full transition-all duration-500 ${state.ndviCurrent < 0.30 ? 'bg-rose-500' : (state.ndviCurrent < 0.50 ? 'bg-amber-500' : 'bg-emerald-500')}`;
 
   document.getElementById('fg-ndvi-status').textContent = state.stacNoScene
-    ? 'Coberto por Nuvens'
+    ? `Sem leitura terrestre (${state.ndviCurrent.toFixed(2)})`
     : (state.ndviCurrent < 0.30
-      ? 'Terra Descoberta'
-      : (state.ndviCurrent < 0.55 ? 'Verde Médio' : 'Bem Verde'));
+      ? `Terra Descoberta (${state.ndviCurrent.toFixed(2)})`
+      : (state.ndviCurrent < 0.55 ? `Verde Médio (${state.ndviCurrent.toFixed(2)})` : `Bem Verde (${state.ndviCurrent.toFixed(2)})`));
 
   const ndviPill = document.getElementById('fg-ndvi-pill');
-  ndviPill.textContent = state.stacNoScene ? 'Nuvem' : (state.ndviCurrent < 0.30 ? 'Exposta' : 'Saudável');
+  ndviPill.textContent = state.stacNoScene ? 'Água/Nuvem' : (state.ndviCurrent < 0.30 ? 'Exposta' : 'Saudável');
   ndviPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${state.stacNoScene ? 'bg-slate-200 text-slate-800' : (state.ndviCurrent < 0.30 ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200/80 text-emerald-950')}`;
 
-  const tempDisplay = state.liveTempMaxToday ?? state.nasaTemp;
-  document.getElementById('fg-temp').textContent = `${tempDisplay.toFixed(0)} °C`;
-  document.getElementById('fg-rain').textContent = state.liveRainNext7d !== undefined
-    ? `${Math.round(state.liveRainNext7d)} mm (7 dias)`
-    : `${state.nasaRain.toLocaleString('pt-BR')} mm/ano`;
+  document.getElementById('fg-temp').textContent = `${state.nasaTemp.toFixed(1)} °C`;
+  document.getElementById('fg-rain').textContent = `${state.nasaRain.toLocaleString('pt-BR')} mm`;
 
-  document.getElementById('val-smap').textContent = `${smapVal}% vol (${pctCad}% da CAD na raiz)`;
+  document.getElementById('val-smap').textContent = `${smapVal}% vol (${eff.smapDelta > 0 ? '+' : ''}${eff.smapDelta}%)`;
   document.getElementById('val-ndvi').textContent = state.stacLive && state.stacDate
     ? `NDVI ${state.ndviCurrent.toFixed(2)} (${state.stacDate})`
     : `NDVI ${state.ndviCurrent.toFixed(2)}`;
@@ -543,7 +513,6 @@ function runSimulation() {
   renderTechScenarios();
   updateRadarChart();
   updateClimateStress();
-  updateDiagnosticUI();
 }
 
 function renderSimpleDecisionCard() {
@@ -686,7 +655,6 @@ function updateClimateStress() {
   }
 
   updateLossAndFuturesUI();
-  updateNasaCropAlertsUI();
 }
 
 // ============================================================================
@@ -1150,51 +1118,17 @@ function useDeviceGPS() {
 // REPORT & MODALS
 // ============================================================================
 function openReportModal() {
-  const isSimple = experienceMode === 'produtor';
   const p = getFarmProfile();
   const chosen = state.scenarios.find(s => s.id === state.selectedScenarioId) || state.scenarios[0];
   const resiliencePct = state.lastResilience[chosen.id] ?? 91;
   const fut = state.lastFuturesCalc || calculateScenarioLossAndFutures(chosen.id);
 
-  if (isSimple) {
-    const simpleAlertsBlock = state.lastNasaAlerts && state.lastNasaAlerts.alerts.length
-      ? `\n🛰️ *SITUAÇÃO DA LAVOURA HOJE:*\n` +
-        state.lastNasaAlerts.alerts.map(a => `${a.icon} *${a.simpleTitle || a.title}*\n   👉 O que fazer hoje: ${a.simpleAction || a.actions[0]}`).join('\n') + '\n'
-      : '';
-
-    const simpleReportText = `🌱 *MEU PLANO DE SAFRA — AGROCYCLE AI*
-----------------------------------------
-📍 *Propriedade:* ${state.locationLabel} (${formatArea(state.areaHa)})
-🌾 *Plantação:* ${fut.cropName} (${p.irrigation === 'irrigado' ? 'Com Irrigação' : 'Só Chuva'})
-${simpleAlertsBlock}
-✅ *O QUE PLANTAR (${chosen.title.toUpperCase()}):*
-1️⃣ ${chosen.cycles[0].period}: *${chosen.cycles[0].crop}*
-2️⃣ ${chosen.cycles[1].period}: *${chosen.cycles[1].crop}*
-3️⃣ ${chosen.cycles[2].period}: *${chosen.cycles[2].crop}*
-
-💰 *RESULTADO ESTIMADO:*
-• Sobra estimada na propriedade: *R$ ${fut.netProfitBrl.toLocaleString('pt-BR')}* (R$ ${fut.netProfitHa.toLocaleString('pt-BR')}/ha)
-• Economia estimada com adubo: *R$ ${chosen.ureaSaved}/ha*
-• Proteção da colheita: *${resiliencePct}%*
-
-💡 *Resumo:* ${chosen.plainExplain}`;
-
-    document.getElementById('report-content').textContent = simpleReportText;
-    document.getElementById('report-modal').classList.remove('hidden');
-    return;
-  }
-
-  const nasaReportBlock = state.lastNasaAlerts && state.lastNasaAlerts.alerts.length
-    ? `\n🛰️ *AVISOS ATIVOS DA NASA HOJE (${state.lastNasaAlerts.stageCode} • ${state.lastNasaAlerts.dap} DAP | Raiz ${state.lastNasaAlerts.zCm} cm):*\n` +
-      state.lastNasaAlerts.alerts.map(a => `${a.icon} *${a.title}*\n   • Ação hoje: ${a.actions[0]}`).join('\n') + '\n'
-    : '';
-
-  const reportText = `🌱 *RELATÓRIO TÉCNICO DE SAFRA — AGROCYCLE AI*
+  const reportText = `🌱 *PLANO SIMPLES DE SAFRA — AGROCYCLE AI*
 ----------------------------------------
 📍 *Local:* ${state.locationLabel}
 📐 *Tamanho:* ${formatArea(state.areaHa)}
 🌾 *Lavoura Principal:* ${p.crop.toUpperCase()} (${p.soil}, ${p.irrigation})
-${nasaReportBlock}
+
 ✅ *${chosen.title.toUpperCase()}*
 1️⃣ ${chosen.cycles[0].period}: *${chosen.cycles[0].crop}*
 2️⃣ ${chosen.cycles[1].period}: *${chosen.cycles[1].crop}*
@@ -1427,311 +1361,16 @@ async function runAgroShieldBonus() {
 }
 
 // ============================================================================
-// MINHA LAVOURA GRAVADA & CENTRAL DE AVISOS INTELIGENTES DA NASA
-// ============================================================================
-const SAVED_CROP_STORAGE_KEY = 'agrocycle_saved_farm_v1';
-
-function saveCurrentCropToBrowser() {
-  const p = getFarmProfile();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const plantingDate = bonusAddDays(today, -Number(p.dap || 20));
-  const plantingDateISO = bonusToISODate(plantingDate);
-
-  const payload = {
-    regionKey: state.regionKey,
-    isCustomLocation: state.isCustomLocation,
-    locationLabel: state.locationLabel,
-    lat: state.lat,
-    lon: state.lon,
-    polygon: state.currentPolygon,
-    areaHa: state.areaHa,
-    areaUnit: document.getElementById('area-unit-select')?.value || 'ha',
-    crop: p.crop,
-    soil: p.soil,
-    compaction: p.compaction,
-    irrigation: p.irrigation,
-    ph: p.ph,
-    mo: p.mo,
-    dapAtSave: p.dap,
-    plantingDateISO,
-    machMiudas: p.machMiudas,
-    savedAtISO: bonusToISODate(today)
-  };
-
-  try {
-    localStorage.setItem(SAVED_CROP_STORAGE_KEY, JSON.stringify(payload));
-    state.isCropSaved = true;
-    state.savedPlantingDateISO = plantingDateISO;
-    updateNasaCropAlertsUI();
-    showToast(`Lavoura de ${CROP_ECONOMICS[p.crop]?.name || p.crop} gravada! Os avisos da NASA serão atualizados automaticamente a cada acesso.`, 'emerald');
-  } catch (e) {
-    showToast('Não foi possível gravar no navegador.', 'amber');
-  }
-}
-
-function loadSavedCropFromBrowser() {
-  try {
-    const raw = localStorage.getItem(SAVED_CROP_STORAGE_KEY);
-    if (!raw) return false;
-    const saved = JSON.parse(raw);
-    if (!saved || !saved.crop) return false;
-
-    state.regionKey = saved.regionKey || 'campo_mourao';
-    state.isCustomLocation = Boolean(saved.isCustomLocation);
-    state.locationLabel = saved.locationLabel || PRESETS[state.regionKey]?.name || 'Talhão Salvo';
-    state.lat = Number(saved.lat) || PRESETS.campo_mourao.lat;
-    state.lon = Number(saved.lon) || PRESETS.campo_mourao.lon;
-    state.currentPolygon = Array.isArray(saved.polygon) && saved.polygon.length >= 3 ? saved.polygon : PRESETS.campo_mourao.polygon;
-    state.isCropSaved = true;
-    state.savedPlantingDateISO = saved.plantingDateISO || null;
-
-    // Atualiza automaticamente os Dias Após o Plantio (DAP) conforme a data real de hoje
-    let autoDap = Number(saved.dapAtSave ?? 20);
-    if (saved.plantingDateISO) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const diff = bonusDiffDays(today, bonusParseISODate(saved.plantingDateISO));
-      if (!isNaN(diff) && diff >= 0 && diff <= 160) autoDap = diff;
-    }
-
-    const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
-    setVal('region-select', state.regionKey);
-    setVal('area-unit-select', saved.areaUnit || 'ha');
-    setVal('input-crop', saved.crop);
-    setVal('input-soil', saved.soil || 'argiloso');
-    setVal('input-compaction', saved.compaction || 'medio');
-    setVal('input-irrigation', saved.irrigation || 'sequeiro');
-    setVal('input-ph', saved.ph ?? 5.6);
-    setVal('input-mo', saved.mo ?? 2.4);
-    setVal('input-dap', autoDap);
-
-    const phLabel = document.getElementById('val-ph');
-    if (phLabel) phLabel.textContent = saved.ph ?? 5.6;
-    const moLabel = document.getElementById('val-mo');
-    if (moLabel) moLabel.textContent = `${saved.mo ?? 2.4}%`;
-    const dapLabel = document.getElementById('val-dap');
-    if (dapLabel) dapLabel.textContent = `${autoDap} dias`;
-
-    if (typeof saved.machMiudas === 'boolean') {
-      setSimpleMiudas(saved.machMiudas);
-    }
-
-    // Destaca o botão correspondente de DAP no Modo Produtor
-    const nearestPreset = [0, 20, 50, 80].reduce((prev, curr) => Math.abs(curr - autoDap) < Math.abs(prev - autoDap) ? curr : prev, 20);
-    document.querySelectorAll('.quick-dap-btn').forEach(b => {
-      const isMatch = (b.getAttribute('onclick') || '').includes(`selectDapPreset(${nearestPreset}`);
-      b.className = b.className.replace('border-2 border-emerald-600 bg-emerald-50', 'border border-slate-200 bg-white hover:border-emerald-400');
-      if (isMatch) b.className = b.className.replace('border border-slate-200 bg-white hover:border-emerald-400', 'border-2 border-emerald-600 bg-emerald-50');
-    });
-
-    if (map) {
-      map.setView([state.lat, state.lon], 14);
-      drawFieldPolygon(state.currentPolygon);
-    }
-    syncFuturesDefaultsForCrop(saved.crop, true);
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-function clearSavedCropFromBrowser() {
-  try {
-    localStorage.removeItem(SAVED_CROP_STORAGE_KEY);
-  } catch {}
-  state.isCropSaved = false;
-  state.savedPlantingDateISO = null;
-  updateNasaCropAlertsUI();
-  showToast('Lavoura gravada removida do navegador.', 'amber');
-}
-
-function refreshLiveNasaTelemetry() {
-  showToast('Consultando dados reais de hoje (NASA POWER, Sentinel-2, SoilGrids e Open-Meteo)...', 'emerald');
-  fetchNasaPowerClimatology(state.lat, state.lon);
-  fetchPlanetaryComputerNDVI(state.currentPolygon);
-  fetchRealtimeHydroAndSoil(state.lat, state.lon);
-}
-window.refreshLiveNasaTelemetry = refreshLiveNasaTelemetry;
-
-function updateNasaCropAlertsUI() {
-  const listEl = document.getElementById('nasa-active-alerts-list');
-  if (!listEl) return;
-
-  const isSimple = experienceMode === 'produtor';
-  const p = getFarmProfile();
-  const eff = getEffectiveOrbitalMetrics();
-
-  // Sem parâmetros de simulação: somente leitura real do dia
-  const report = computeNasaCropAlerts(p, eff, state);
-  state.lastNasaAlerts = report;
-
-  const badgeEl = document.getElementById('saved-crop-status-badge');
-  const clearBtn = document.getElementById('btn-clear-saved-crop');
-  if (badgeEl) {
-    if (state.isCropSaved) {
-      badgeEl.textContent = state.savedPlantingDateISO
-        ? `✓ Lavoura Gravada (Plantio: ${state.savedPlantingDateISO.split('-').reverse().join('/')})`
-        : '✓ Lavoura Gravada no App';
-      badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-400 text-slate-950';
-      if (clearBtn) clearBtn.classList.remove('hidden');
-    } else {
-      badgeEl.textContent = 'Não gravada • Toque em Gravar Lavoura';
-      badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-400 text-slate-950';
-      if (clearBtn) clearBtn.classList.add('hidden');
-    }
-  }
-
-  const dateBadge = document.getElementById('nasa-live-date-badge');
-  if (dateBadge) {
-    const todayStr = bonusToISODate(new Date()).split('-').reverse().join('/');
-    const sourceStatus = state.realtimeLive || state.nasaLive ? '📡 Leitura Real Hoje' : '📡 Conectando Satélites';
-    dateBadge.textContent = `${sourceStatus} (${todayStr})`;
-  }
-
-  const titleEl = document.getElementById('saved-crop-header-title');
-  if (titleEl) {
-    const irrLabel = p.irrigation === 'irrigado' ? 'Irrigado' : 'Só Chuva';
-    titleEl.textContent = isSimple
-      ? `${report.cropName} • ${report.stageName} (${report.dap} dias) • ${state.locationLabel}`
-      : `${report.cropName} • ${report.stageCode} (${report.dap} DAP) • ${state.locationLabel} (${formatArea(state.areaHa)} • ${irrLabel})`;
-  }
-
-  const phenoEl = document.getElementById('saved-crop-phenology-summary');
-  if (phenoEl) {
-    if (isSimple) {
-      const waterLabel = report.pctCad <= 50 ? 'Pouca água' : (report.pctCad < 65 ? 'Umidade média' : 'Boa umidade');
-      phenoEl.innerHTML = `
-        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">💧 Terra hoje: ${waterLabel}</span>
-        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">🌡️ Clima hoje: ${report.liveTemp.toFixed(0)} °C</span>
-        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">🌧️ Chuva próx. 7 dias: ${Math.round(report.liveRain7d)} mm</span>
-      `;
-    } else {
-      phenoEl.innerHTML = `
-        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">🌱 Estágio: ${report.stageCode} (${report.dap} dias)</span>
-        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">📏 Raiz ativa: ${report.zCm} cm</span>
-        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">💧 Coef. Cultura (Kc): ${report.kc.toFixed(2).replace('.', ',')}</span>
-        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">☀️ Consumo hoje (ETc): ${report.etcToday.toFixed(2).replace('.', ',')} mm/dia</span>
-      `;
-    }
-  }
-
-  const gridEl = document.getElementById('nasa-live-telemetry-grid');
-  if (gridEl) {
-    gridEl.classList.toggle('hidden', isSimple);
-    if (!isSimple) {
-      gridEl.innerHTML = `
-        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-          <div class="text-[10px] font-bold uppercase text-slate-500">Água na Raiz Hoje</div>
-          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.armMm} / ${report.cadMm} mm (${report.pctCad}%)</div>
-        </div>
-        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-          <div class="text-[10px] font-bold uppercase text-slate-500">Umidade 0–7 cm</div>
-          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.soilMoisturePct}% vol</div>
-        </div>
-        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-          <div class="text-[10px] font-bold uppercase text-slate-500">Temp. Hoje / Mín 7d</div>
-          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveTemp.toFixed(1)} °C / ${report.liveTmin.toFixed(1)} °C</div>
-        </div>
-        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-          <div class="text-[10px] font-bold uppercase text-slate-500">Radiação Solar Hoje</div>
-          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveSolar.toFixed(1)} MJ/m²/d</div>
-        </div>
-        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-          <div class="text-[10px] font-bold uppercase text-slate-500">Chuva Prevista (7d)</div>
-          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveRain7d} mm</div>
-        </div>
-        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-          <div class="text-[10px] font-bold uppercase text-slate-500">NDVI Sentinel-2</div>
-          <div class="text-sm font-extrabold text-emerald-800 mt-0.5">${report.ndviVal.toFixed(2)} ${state.stacDate ? `(${state.stacDate})` : ''}</div>
-        </div>
-      `;
-    }
-  }
-
-  listEl.innerHTML = report.alerts.map(alert => {
-    const styleMap = {
-      critico: {
-        box: 'border-rose-300 bg-rose-50/70',
-        pill: 'bg-rose-200/90 text-rose-950',
-        title: 'text-rose-950',
-        actionBox: 'bg-white border-rose-200'
-      },
-      atencao: {
-        box: 'border-amber-300 bg-amber-50/70',
-        pill: 'bg-amber-200/90 text-amber-950',
-        title: 'text-amber-950',
-        actionBox: 'bg-white border-amber-200'
-      },
-      otimo: {
-        box: 'border-emerald-300 bg-emerald-50/70',
-        pill: 'bg-emerald-200/90 text-emerald-950',
-        title: 'text-emerald-950',
-        actionBox: 'bg-white border-emerald-200'
-      }
-    };
-    const st = styleMap[alert.severity] || styleMap.otimo;
-
-    if (isSimple) {
-      return `
-        <div class="p-4 rounded-2xl border-2 ${st.box} space-y-2 transition-all">
-          <div class="flex items-center gap-2.5">
-            <span class="text-xl leading-none">${alert.icon}</span>
-            <h3 class="text-sm sm:text-base font-extrabold ${st.title}">${alert.simpleTitle || alert.title}</h3>
-          </div>
-          <p class="text-xs sm:text-sm text-slate-700">${alert.simpleSummary || ''}</p>
-          <div class="p-3 rounded-xl ${st.actionBox} border text-xs sm:text-sm text-slate-900">
-            <strong>🚜 O que fazer hoje:</strong> ${alert.simpleAction || alert.actions[0]}
-          </div>
-        </div>
-      `;
-    }
-
-    return `
-      <div class="p-4 rounded-2xl border-2 ${st.box} space-y-3 transition-all">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div class="flex items-start sm:items-center gap-2.5">
-            <span class="text-xl leading-none">${alert.icon}</span>
-            <h3 class="text-sm sm:text-base font-extrabold ${st.title}">${alert.title}</h3>
-          </div>
-          <span class="self-start sm:self-center px-2.5 py-1 rounded-lg font-mono text-[11px] font-extrabold ${st.pill}">
-            ${alert.badge}
-          </span>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
-          <div class="md:col-span-5 p-3 rounded-xl ${st.actionBox} border space-y-1">
-            <div class="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">🛰️ O que os satélites e sensores reais mostram hoje</div>
-            <p class="text-slate-700 leading-relaxed">${alert.diagnosis}</p>
-          </div>
-          <div class="md:col-span-7 p-3 rounded-xl ${st.actionBox} border space-y-1.5">
-            <div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800">🚜 O que fazer na lavoura HOJE (Recomendações Práticas)</div>
-            <ul class="space-y-1 text-slate-800 list-disc pl-4 leading-relaxed">
-              ${alert.actions.map(act => `<li>${act}</li>`).join('')}
-            </ul>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-// ============================================================================
 // BOOTSTRAP
 // ============================================================================
 window.addEventListener('DOMContentLoaded', () => {
   if (typeof lucide !== 'undefined') lucide.createIcons();
   if (typeof L !== 'undefined') initMap();
-  const hadSavedCrop = loadSavedCropFromBrowser();
   setExperienceMode('produtor');
   syncVisualButtonsFromSelects();
-  runSimulation();
   updateDiagnosticUI();
   updateHistoricalChart();
+  runSimulation();
   fetchNasaPowerClimatology(state.lat, state.lon);
   fetchPlanetaryComputerNDVI(state.currentPolygon);
-  fetchRealtimeHydroAndSoil(state.lat, state.lon);
-  if (hadSavedCrop) {
-    showToast(`Lavoura gravada de ${CROP_ECONOMICS[document.getElementById('input-crop').value]?.name || 'Safra'} carregada com dados em tempo real!`, 'emerald');
-  }
 });
