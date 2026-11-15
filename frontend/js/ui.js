@@ -34,7 +34,11 @@ let state = {
   lastResilience: { pragmatico: 91, financeiro: 72, blindagem: 96 },
   stacNoScene: false,
   agroShield: null,
-  lastFuturesCalc: null
+  lastFuturesCalc: null,
+  nasaAlertSituation: 'auto',
+  isCropSaved: false,
+  savedPlantingDateISO: null,
+  lastNasaAlerts: null
 };
 
 let experienceMode = 'produtor';
@@ -655,6 +659,7 @@ function updateClimateStress() {
   }
 
   updateLossAndFuturesUI();
+  updateNasaCropAlertsUI();
 }
 
 // ============================================================================
@@ -1123,12 +1128,17 @@ function openReportModal() {
   const resiliencePct = state.lastResilience[chosen.id] ?? 91;
   const fut = state.lastFuturesCalc || calculateScenarioLossAndFutures(chosen.id);
 
+  const nasaReportBlock = state.lastNasaAlerts && state.lastNasaAlerts.alerts.length
+    ? `\n🛰️ *AVISOS ATIVOS DA NASA HOJE (${state.lastNasaAlerts.stageCode} • ${state.lastNasaAlerts.dap} DAP | Raiz ${state.lastNasaAlerts.zCm} cm):*\n` +
+      state.lastNasaAlerts.alerts.map(a => `${a.icon} *${a.title}*\n   • Ação hoje: ${a.actions[0]}`).join('\n') + '\n'
+    : '';
+
   const reportText = `🌱 *PLANO SIMPLES DE SAFRA — AGROCYCLE AI*
 ----------------------------------------
 📍 *Local:* ${state.locationLabel}
 📐 *Tamanho:* ${formatArea(state.areaHa)}
 🌾 *Lavoura Principal:* ${p.crop.toUpperCase()} (${p.soil}, ${p.irrigation})
-
+${nasaReportBlock}
 ✅ *${chosen.title.toUpperCase()}*
 1️⃣ ${chosen.cycles[0].period}: *${chosen.cycles[0].crop}*
 2️⃣ ${chosen.cycles[1].period}: *${chosen.cycles[1].crop}*
@@ -1361,11 +1371,252 @@ async function runAgroShieldBonus() {
 }
 
 // ============================================================================
+// MINHA LAVOURA GRAVADA & CENTRAL DE AVISOS INTELIGENTES DA NASA
+// ============================================================================
+const SAVED_CROP_STORAGE_KEY = 'agrocycle_saved_farm_v1';
+
+function saveCurrentCropToBrowser() {
+  const p = getFarmProfile();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const plantingDate = bonusAddDays(today, -Number(p.dap || 20));
+  const plantingDateISO = bonusToISODate(plantingDate);
+
+  const payload = {
+    regionKey: state.regionKey,
+    isCustomLocation: state.isCustomLocation,
+    locationLabel: state.locationLabel,
+    lat: state.lat,
+    lon: state.lon,
+    polygon: state.currentPolygon,
+    areaHa: state.areaHa,
+    areaUnit: document.getElementById('area-unit-select')?.value || 'ha',
+    crop: p.crop,
+    soil: p.soil,
+    compaction: p.compaction,
+    irrigation: p.irrigation,
+    ph: p.ph,
+    mo: p.mo,
+    dapAtSave: p.dap,
+    plantingDateISO,
+    machMiudas: p.machMiudas,
+    savedAtISO: bonusToISODate(today)
+  };
+
+  try {
+    localStorage.setItem(SAVED_CROP_STORAGE_KEY, JSON.stringify(payload));
+    state.isCropSaved = true;
+    state.savedPlantingDateISO = plantingDateISO;
+    updateNasaCropAlertsUI();
+    showToast(`Lavoura de ${CROP_ECONOMICS[p.crop]?.name || p.crop} gravada! Os avisos da NASA serão atualizados automaticamente a cada acesso.`, 'emerald');
+  } catch (e) {
+    showToast('Não foi possível gravar no navegador.', 'amber');
+  }
+}
+
+function loadSavedCropFromBrowser() {
+  try {
+    const raw = localStorage.getItem(SAVED_CROP_STORAGE_KEY);
+    if (!raw) return false;
+    const saved = JSON.parse(raw);
+    if (!saved || !saved.crop) return false;
+
+    state.regionKey = saved.regionKey || 'campo_mourao';
+    state.isCustomLocation = Boolean(saved.isCustomLocation);
+    state.locationLabel = saved.locationLabel || PRESETS[state.regionKey]?.name || 'Talhão Salvo';
+    state.lat = Number(saved.lat) || PRESETS.campo_mourao.lat;
+    state.lon = Number(saved.lon) || PRESETS.campo_mourao.lon;
+    state.currentPolygon = Array.isArray(saved.polygon) && saved.polygon.length >= 3 ? saved.polygon : PRESETS.campo_mourao.polygon;
+    state.isCropSaved = true;
+    state.savedPlantingDateISO = saved.plantingDateISO || null;
+
+    // Atualiza automaticamente os Dias Após o Plantio (DAP) conforme a data real de hoje
+    let autoDap = Number(saved.dapAtSave ?? 20);
+    if (saved.plantingDateISO) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diff = bonusDiffDays(today, bonusParseISODate(saved.plantingDateISO));
+      if (!isNaN(diff) && diff >= 0 && diff <= 160) autoDap = diff;
+    }
+
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
+    setVal('region-select', state.regionKey);
+    setVal('area-unit-select', saved.areaUnit || 'ha');
+    setVal('input-crop', saved.crop);
+    setVal('input-soil', saved.soil || 'argiloso');
+    setVal('input-compaction', saved.compaction || 'medio');
+    setVal('input-irrigation', saved.irrigation || 'sequeiro');
+    setVal('input-ph', saved.ph ?? 5.6);
+    setVal('input-mo', saved.mo ?? 2.4);
+    setVal('input-dap', autoDap);
+
+    const phLabel = document.getElementById('val-ph');
+    if (phLabel) phLabel.textContent = saved.ph ?? 5.6;
+    const moLabel = document.getElementById('val-mo');
+    if (moLabel) moLabel.textContent = `${saved.mo ?? 2.4}%`;
+    const dapLabel = document.getElementById('val-dap');
+    if (dapLabel) dapLabel.textContent = `${autoDap} dias`;
+
+    if (typeof saved.machMiudas === 'boolean') {
+      setSimpleMiudas(saved.machMiudas);
+    }
+
+    // Destaca o botão correspondente de DAP no Modo Produtor
+    const nearestPreset = [0, 20, 50, 80].reduce((prev, curr) => Math.abs(curr - autoDap) < Math.abs(prev - autoDap) ? curr : prev, 20);
+    document.querySelectorAll('.quick-dap-btn').forEach(b => {
+      const isMatch = (b.getAttribute('onclick') || '').includes(`selectDapPreset(${nearestPreset}`);
+      b.className = b.className.replace('border-2 border-emerald-600 bg-emerald-50', 'border border-slate-200 bg-white hover:border-emerald-400');
+      if (isMatch) b.className = b.className.replace('border border-slate-200 bg-white hover:border-emerald-400', 'border-2 border-emerald-600 bg-emerald-50');
+    });
+
+    if (map) {
+      map.setView([state.lat, state.lon], 14);
+      drawFieldPolygon(state.currentPolygon);
+    }
+    syncFuturesDefaultsForCrop(saved.crop, true);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function clearSavedCropFromBrowser() {
+  try {
+    localStorage.removeItem(SAVED_CROP_STORAGE_KEY);
+  } catch {}
+  state.isCropSaved = false;
+  state.savedPlantingDateISO = null;
+  updateNasaCropAlertsUI();
+  showToast('Lavoura gravada removida do navegador.', 'amber');
+}
+
+function setNasaAlertSituation(mode) {
+  state.nasaAlertSituation = mode || 'auto';
+  ['auto', 'seca', 'calor', 'geada', 'ndvi_baixo'].forEach(key => {
+    const btn = document.getElementById(`nasa-sit-${key}`);
+    if (!btn) return;
+    if (key === state.nasaAlertSituation) {
+      btn.className = 'nasa-sit-btn px-2.5 py-1 rounded-lg border-2 border-emerald-600 bg-emerald-50 text-slate-900 text-[11px] font-extrabold cursor-pointer transition';
+    } else {
+      btn.className = 'nasa-sit-btn px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:border-emerald-400 text-slate-700 text-[11px] font-bold cursor-pointer transition';
+    }
+  });
+  updateNasaCropAlertsUI();
+}
+
+function updateNasaCropAlertsUI() {
+  const listEl = document.getElementById('nasa-active-alerts-list');
+  if (!listEl) return;
+
+  const p = getFarmProfile();
+  const eff = getEffectiveOrbitalMetrics();
+  const rainDelta = Number(document.getElementById('stress-rain')?.value || 0);
+  const tempDelta = Number(document.getElementById('stress-temp')?.value || 0);
+  const frostActive = Boolean(document.getElementById('stress-frost')?.checked);
+
+  const report = computeNasaCropAlerts(
+    p,
+    eff,
+    state,
+    state.agroShield,
+    rainDelta,
+    tempDelta,
+    frostActive,
+    state.nasaAlertSituation || 'auto'
+  );
+  state.lastNasaAlerts = report;
+
+  const badgeEl = document.getElementById('saved-crop-status-badge');
+  const clearBtn = document.getElementById('btn-clear-saved-crop');
+  if (badgeEl) {
+    if (state.isCropSaved) {
+      badgeEl.textContent = state.savedPlantingDateISO
+        ? `✓ Lavoura Gravada (Plantio: ${state.savedPlantingDateISO.split('-').reverse().join('/')})`
+        : '✓ Lavoura Gravada no App';
+      badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-400 text-slate-950';
+      if (clearBtn) clearBtn.classList.remove('hidden');
+    } else {
+      badgeEl.textContent = 'Não gravada • Toque em Gravar Lavoura';
+      badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-400 text-slate-950';
+      if (clearBtn) clearBtn.classList.add('hidden');
+    }
+  }
+
+  const titleEl = document.getElementById('saved-crop-header-title');
+  if (titleEl) {
+    const irrLabel = p.irrigation === 'irrigado' ? 'Irrigado' : 'Sequeiro';
+    titleEl.textContent = `${report.cropName} • ${report.stageName} (${report.dap} DAP) • ${state.locationLabel} (${formatArea(state.areaHa)} • ${irrLabel})`;
+  }
+
+  const phenoEl = document.getElementById('saved-crop-phenology-summary');
+  if (phenoEl) {
+    phenoEl.innerHTML = `
+      <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">🌱 Estágio: ${report.stageCode} (${report.dap} dias)</span>
+      <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">📏 Raiz ativa: ${report.zCm} cm</span>
+      <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">💧 Coef. Cultura (Kc): ${report.kc.toFixed(2).replace('.', ',')}</span>
+      <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">☀️ Consumo hoje (ETc): ${report.etcToday.toFixed(2).replace('.', ',')} mm/dia</span>
+    `;
+  }
+
+  listEl.innerHTML = report.alerts.map(alert => {
+    const styleMap = {
+      critico: {
+        box: 'border-rose-300 bg-rose-50/70',
+        pill: 'bg-rose-200/90 text-rose-950',
+        title: 'text-rose-950',
+        actionBox: 'bg-white border-rose-200'
+      },
+      atencao: {
+        box: 'border-amber-300 bg-amber-50/70',
+        pill: 'bg-amber-200/90 text-amber-950',
+        title: 'text-amber-950',
+        actionBox: 'bg-white border-amber-200'
+      },
+      otimo: {
+        box: 'border-emerald-300 bg-emerald-50/70',
+        pill: 'bg-emerald-200/90 text-emerald-950',
+        title: 'text-emerald-950',
+        actionBox: 'bg-white border-emerald-200'
+      }
+    };
+    const st = styleMap[alert.severity] || styleMap.otimo;
+
+    return `
+      <div class="p-4 rounded-2xl border-2 ${st.box} space-y-3 transition-all">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div class="flex items-start sm:items-center gap-2.5">
+            <span class="text-xl leading-none">${alert.icon}</span>
+            <h3 class="text-sm sm:text-base font-extrabold ${st.title}">${alert.title}</h3>
+          </div>
+          <span class="self-start sm:self-center px-2.5 py-1 rounded-lg font-mono text-[11px] font-extrabold ${st.pill}">
+            ${alert.badge}
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
+          <div class="md:col-span-5 p-3 rounded-xl ${st.actionBox} border space-y-1">
+            <div class="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">🛰️ O que os satélites da NASA detectaram</div>
+            <p class="text-slate-700 leading-relaxed">${alert.diagnosis}</p>
+          </div>
+          <div class="md:col-span-7 p-3 rounded-xl ${st.actionBox} border space-y-1.5">
+            <div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800">🚜 O que fazer na lavoura HOJE (Recomendações Práticas)</div>
+            <ul class="space-y-1 text-slate-800 list-disc pl-4 leading-relaxed">
+              ${alert.actions.map(act => `<li>${act}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ============================================================================
 // BOOTSTRAP
 // ============================================================================
 window.addEventListener('DOMContentLoaded', () => {
   if (typeof lucide !== 'undefined') lucide.createIcons();
   if (typeof L !== 'undefined') initMap();
+  const hadSavedCrop = loadSavedCropFromBrowser();
   setExperienceMode('produtor');
   syncVisualButtonsFromSelects();
   updateDiagnosticUI();
@@ -1373,4 +1624,7 @@ window.addEventListener('DOMContentLoaded', () => {
   runSimulation();
   fetchNasaPowerClimatology(state.lat, state.lon);
   fetchPlanetaryComputerNDVI(state.currentPolygon);
+  if (hadSavedCrop) {
+    showToast(`Lavoura gravada de ${CROP_ECONOMICS[document.getElementById('input-crop').value]?.name || 'Safra'} carregada com avisos da NASA!`, 'emerald');
+  }
 });
