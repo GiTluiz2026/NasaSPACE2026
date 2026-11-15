@@ -110,15 +110,15 @@ function computeAgroShieldDecision(p, eff, currentState, stressRainPct = 0, stre
       }
 
       const pctCad = Math.round((armAtual / Math.max(1, cadAtual)) * 100);
-      let mensagemStatus = `Umidade em tempo real adequada (${pctCad}% da CAD nos ${Math.round(z0)} cm de raiz)`;
+      let mensagemStatus = 'A terra está com boa umidade hoje e favorece o cuidado da lavoura.';
       if (statusAtual === 'Seco') {
         mensagemStatus = p.irrigation === 'irrigado'
-          ? `Solo com ${pctCad}% da CAD hoje: acionar irrigação de reposição`
-          : `Solo com pouca água hoje (${pctCad}% da CAD): proteja com palhada e evite adubar com ureia`;
+          ? 'A terra está seca hoje: ligue a irrigação para proteger a produção.'
+          : 'A terra está com pouca água hoje: mantenha a palhada e evite jogar ureia sem chuva.';
       } else if (alertaIrrigacao) {
         mensagemStatus = p.irrigation === 'irrigado'
-          ? `Previsão real: programar irrigação em até ${diasAteSeca} dias`
-          : `Previsão real: reserva segura por cerca de ${diasAteSeca} dias sem chuva forte`;
+          ? `Atenção: programe a irrigação para os próximos ${diasAteSeca} dias.`
+          : `Atenção: a umidade atual segura a lavoura por cerca de ${diasAteSeca} dias sem chuva.`;
       }
 
       return {
@@ -167,15 +167,15 @@ function computeAgroShieldDecision(p, eff, currentState, stressRainPct = 0, stre
   }
 
   const pctCad = Math.round((armAtual / Math.max(1, cadAtual)) * 100);
-  let mensagemStatus = 'Terra com boa umidade para os próximos dias';
+  let mensagemStatus = 'Terra com boa umidade para os próximos dias.';
   if (statusAtual === 'Seco') {
     mensagemStatus = p.irrigation === 'irrigado'
-      ? 'Terra seca: hora de ligar a irrigação para não perder produção'
-      : 'Terra com pouca água: cubra o solo com palhada antes de plantar';
+      ? 'Terra seca: hora de ligar a irrigação para não perder produção.'
+      : 'Terra com pouca água: proteja o solo com palhada e aguarde chuva para adubar.';
   } else if (alertaIrrigacao) {
     mensagemStatus = p.irrigation === 'irrigado'
-      ? `Atenção: programar irrigação em até ${diasAteSeca} dias`
-      : `Atenção: umidade segura por cerca de ${diasAteSeca} dias sem chuva`;
+      ? `Atenção: programar irrigação em até ${diasAteSeca} dias.`
+      : `Atenção: umidade segura por cerca de ${diasAteSeca} dias sem chuva.`;
   }
 
   return {
@@ -249,39 +249,39 @@ function getCropPhenologyStage(cultura, dap) {
   const c = (cultura || 'soja').toLowerCase();
   const d = Number(dap || 20);
   if (c === 'soja') {
-    if (d <= 15) return { code: 'VE–V2', name: 'Emergência e Raiz Inicial', critical: false };
-    if (d <= 45) return { code: 'V3–V8', name: 'Crescimento Vegetativo', critical: false };
-    if (d <= 75) return { code: 'R1–R4', name: 'Floração e Formação de Vagens', critical: true };
-    if (d <= 100) return { code: 'R5–R6', name: 'Enchimento de Grãos', critical: true };
-    return { code: 'R7–R8', name: 'Maturação Final', critical: false };
+    if (d <= 15) return { code: 'VE–V2', name: 'Início do plantio', critical: false };
+    if (d <= 45) return { code: 'V3–V8', name: 'Crescimento da planta', critical: false };
+    if (d <= 75) return { code: 'R1–R4', name: 'Florada e vagens', critical: true };
+    if (d <= 100) return { code: 'R5–R6', name: 'Enchendo grão', critical: true };
+    return { code: 'R7–R8', name: 'Ponto de colheita', critical: false };
   }
   if (c === 'milho') {
-    if (d <= 18) return { code: 'VE–V3', name: 'Estabelecimento Inicial', critical: false };
-    if (d <= 50) return { code: 'V4–V12', name: 'Definição de Potencial Produtivo', critical: true };
-    if (d <= 85) return { code: 'VT–R3', name: 'Pendoamento e Polinização', critical: true };
-    return { code: 'R4–R6', name: 'Enchimento e Maturação Fisiológica', critical: false };
+    if (d <= 18) return { code: 'VE–V3', name: 'Início do plantio', critical: false };
+    if (d <= 50) return { code: 'V4–V12', name: 'Crescimento da planta', critical: true };
+    if (d <= 85) return { code: 'VT–R3', name: 'Pendoamento e espiga', critical: true };
+    return { code: 'R4–R6', name: 'Enchendo grão', critical: false };
   }
   if (c === 'feijao') {
-    if (d <= 15) return { code: 'V1–V3', name: 'Abertura de Folhas Primárias', critical: false };
-    if (d <= 35) return { code: 'V4', name: 'Ramificação Vegetativa', critical: false };
-    if (d <= 65) return { code: 'R5–R8', name: 'Florada e Enchimento de Vagens', critical: true };
-    return { code: 'R9', name: 'Maturação de Colheita', critical: false };
+    if (d <= 15) return { code: 'V1–V3', name: 'Início do plantio', critical: false };
+    if (d <= 35) return { code: 'V4', name: 'Crescimento da planta', critical: false };
+    if (d <= 65) return { code: 'R5–R8', name: 'Florada e vagens', critical: true };
+    return { code: 'R9', name: 'Ponto de colheita', critical: false };
   }
   if (c === 'mandioca') {
-    if (d <= 30) return { code: 'Fase 1', name: 'Brotação e Enraizamento', critical: true };
-    if (d <= 90) return { code: 'Fase 2', name: 'Formação de Parte Aérea', critical: false };
-    return { code: 'Fase 3–4', name: 'Engrossamento de Raízes Tuberosas', critical: true };
+    if (d <= 30) return { code: 'Fase 1', name: 'Brotação', critical: true };
+    if (d <= 90) return { code: 'Fase 2', name: 'Crescimento das ramas', critical: false };
+    return { code: 'Fase 3–4', name: 'Engrossando raiz', critical: true };
   }
   if (c === 'algodao') {
-    if (d <= 25) return { code: 'V1–V5', name: 'Plântula e Enraizamento', critical: false };
-    if (d <= 65) return { code: 'B1–F1', name: 'Botão Floral e Primeiras Flores', critical: true };
-    if (d <= 110) return { code: 'F2–C1', name: 'Desenvolvimento de Maçãs e Capulhos', critical: true };
-    return { code: 'C2+', name: 'Abertura de Capulhos', critical: false };
+    if (d <= 25) return { code: 'V1–V5', name: 'Início do plantio', critical: false };
+    if (d <= 65) return { code: 'B1–F1', name: 'Primeiras flores', critical: true };
+    if (d <= 110) return { code: 'F2–C1', name: 'Formando maçãs', critical: true };
+    return { code: 'C2+', name: 'Abertura de capulhos', critical: false };
   }
-  if (d <= 20) return { code: 'Fase Inicial', name: 'Emergência e Perfilhamento', critical: false };
-  if (d <= 55) return { code: 'Alongamento', name: 'Alongamento de Colmos', critical: true };
-  if (d <= 85) return { code: 'Espigamento', name: 'Floração e Enchimento de Grãos', critical: true };
-  return { code: 'Maturação', name: 'Maturação de Colheita', critical: false };
+  if (d <= 20) return { code: 'Fase Inicial', name: 'Início do plantio', critical: false };
+  if (d <= 55) return { code: 'Alongamento', name: 'Crescimento da planta', critical: true };
+  if (d <= 85) return { code: 'Espigamento', name: 'Florada e grãos', critical: true };
+  return { code: 'Maturação', name: 'Ponto de colheita', critical: false };
 }
 
 function computeNasaCropAlerts(p, eff, currentState) {
@@ -319,6 +319,11 @@ function computeNasaCropAlerts(p, eff, currentState) {
       id: 'water_deficit',
       severity: 'critico',
       icon: '🔴',
+      simpleTitle: `Pouca água na terra hoje para ${cropCfg.name}`,
+      simpleSummary: `A terra está seca na região da raiz hoje.`,
+      simpleAction: p.irrigation === 'irrigado'
+        ? `Ligue a irrigação hoje ou amanhã e não jogue ureia na terra seca.`
+        : `Mantenha a palhada na terra e não jogue adubo (ureia) até chover.`,
       badge: `Leitura Real • ARM ${armMm} mm / CAD ${cadMm} mm (${pctCad}%)`,
       title: `Déficit Hídrico Real na Raiz (${cropCfg.name} aos ${dap} DAP — ${stage.name})`,
       diagnosis: `A reserva real de água nos ${Math.round(zCm)} cm de raiz está em ${pctCad}% da Capacidade de Água Disponível (CAD), com umidade superficial de ${soilMoisturePct}% vol e consumo da planta em ${etcToday} mm/dia (Kc = ${kc.toFixed(2)}).`,
@@ -335,6 +340,11 @@ function computeNasaCropAlerts(p, eff, currentState) {
       id: 'water_warning',
       severity: 'atencao',
       icon: '🟡',
+      simpleTitle: `Atenção: A terra pode secar em ${diasAteSeca} dias`,
+      simpleSummary: `Hoje ainda tem umidade, mas a previsão mostra pouca chuva nos próximos dias.`,
+      simpleAction: p.irrigation === 'irrigado'
+        ? `Prepare a irrigação para entrar nos próximos ${diasAteSeca} dias.`
+        : `Se precisar adubar ou cuidar da roça, aproveite os próximos 2 dias enquanto a terra ainda está úmida.`,
       badge: `Previsão Real 7d • Reserva p/ ${diasAteSeca} dias (${pctCad}% CAD)`,
       title: `Atenção Hídrica: Umidade entra no limite crítico em ${diasAteSeca} dias`,
       diagnosis: `Hoje o solo possui ${armMm} mm (${pctCad}% da CAD), mas com consumo real (ETc) de ${etcToday} mm/dia nos ${Math.round(zCm)} cm de raiz e previsão de ${liveRain7d} mm de chuva nos próximos 7 dias, a reserva útil cai abaixo de 50% em ${diasAteSeca} dias.`,
@@ -342,7 +352,7 @@ function computeNasaCropAlerts(p, eff, currentState) {
         p.irrigation === 'irrigado'
           ? `Programar turno de rega preventivo de ${Math.max(10, Math.round(etcToday * 3))} mm antes que o armazenamento caia abaixo de 50% da CAD.`
           : `Aproveitar a umidade atual (${pctCad}% da CAD) caso precise realizar tratos culturais nos próximos ${Math.max(1, diasAteSeca - 2)} dias.`,
-        `Acompanhar a evolução diária da água na raiz no gráfico de 7 dias do Passo 3.`
+        `Acompanhar a evolução diária da água na raiz no gráfico de 7 dias do Modo Técnico.`
       ]
     });
   }
@@ -353,6 +363,9 @@ function computeNasaCropAlerts(p, eff, currentState) {
       id: 'heat_radiation',
       severity: 'atencao',
       icon: '🟠',
+      simpleTitle: `Calor forte hoje (${liveTemp.toFixed(0)} °C)`,
+      simpleSummary: `O sol e o calor estão fortes hoje na sua região.`,
+      simpleAction: `Não passe defensivo ou adubo foliar nas horas quentes (entre 10h e 16h). Prefira aplicar bem cedo ou no fim da tarde.`,
       badge: `NASA POWER + Open-Meteo • Máx Hoje: ${liveTemp.toFixed(1)} °C | Radiação: ${liveSolar.toFixed(1)} MJ/m²`,
       title: `Alta Temperatura e Demanda Evaporativa Hoje em ${cropCfg.name} (${stage.code})`,
       diagnosis: `A telemetria meteorológica registra máxima de ${liveTemp.toFixed(1)} °C e radiação solar de ${liveSolar.toFixed(1)} MJ/m²/dia hoje, elevando a evapotranspiração de referência (ET₀ = ${et0Today} mm/dia).`,
@@ -372,6 +385,9 @@ function computeNasaCropAlerts(p, eff, currentState) {
       id: 'frost_risk',
       severity: 'critico',
       icon: '🔵',
+      simpleTitle: `Alerta de frio forte (${liveTmin.toFixed(0)} °C previstos)`,
+      simpleSummary: `Previsão de queda forte de temperatura nos próximos dias.`,
+      simpleAction: `Evite mexer na terra ou passar herbicida antes do frio passar.`,
       badge: `Mínima Real Prevista: ${liveTmin.toFixed(1).replace('.', ',')} °C`,
       title: `Alerta de Frio Intenso para ${cropCfg.name} (${stage.name})`,
       diagnosis: `Os dados meteorológicos apontam temperatura mínima de ${liveTmin.toFixed(1).replace('.', ',')} °C na região do talhão durante a fase ${stage.name}.`,
@@ -390,6 +406,9 @@ function computeNasaCropAlerts(p, eff, currentState) {
       id: 'ndvi_drop',
       severity: 'atencao',
       icon: '🟣',
+      simpleTitle: `Partes da roça estão menos verdes que o esperado`,
+      simpleSummary: `O satélite mostrou manchas amarelas ou falhas no verde da plantação.`,
+      simpleAction: `Olhe no mapa onde estão as manchas amarelas/vermelhas e confira no campo se há praga ou falta de adubo.`,
       badge: `Sentinel-2 L2A (B08/B04) • NDVI Real: ${ndviVal.toFixed(2)} (Esperado ≥ ${expectedNdviMin.toFixed(2)})`,
       title: `Vigor Vegetativo (NDVI) no Talhão Abaixo do Esperado aos ${dap} DAP`,
       diagnosis: `A leitura real do satélite Sentinel-2 sobre o polígono indica NDVI médio de ${ndviVal.toFixed(2)}, abaixo da referência fenológica (${expectedNdviMin.toFixed(2)}) para ${cropCfg.name} na fase ${stage.code}.`,
@@ -407,6 +426,9 @@ function computeNasaCropAlerts(p, eff, currentState) {
       id: 'optimal_window',
       severity: 'otimo',
       icon: '🟢',
+      simpleTitle: `Tudo certo com a sua lavoura de ${cropCfg.name} hoje`,
+      simpleSummary: `A terra está com boa umidade e o clima de hoje está favorável.`,
+      simpleAction: `Bom dia para cuidar da roça, adubar ou aplicar defensivo se precisar.`,
       badge: `Leitura Real Hoje • CAD ${pctCad}% (${armMm}/${cadMm} mm) | NDVI ${ndviVal.toFixed(2)} | ETc ${etcToday} mm/d`,
       title: `Condições Reais Favoráveis Hoje para ${cropCfg.name} (${dap} DAP — ${stage.name})`,
       diagnosis: `Os sensores reais do dia mostram raiz de ${Math.round(zCm)} cm suprida com ${armMm} mm de água (${pctCad}% da CAD), umidade superficial em ${soilMoisturePct}% vol, NDVI em ${ndviVal.toFixed(2)} e previsão de ${liveRain7d} mm de chuva para os próximos 7 dias.`,

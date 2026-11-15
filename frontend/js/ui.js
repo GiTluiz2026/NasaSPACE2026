@@ -396,20 +396,20 @@ function updateDiagnosticUI() {
   ndviBar.className = `h-full rounded-full transition-all duration-500 ${state.ndviCurrent < 0.30 ? 'bg-rose-500' : (state.ndviCurrent < 0.50 ? 'bg-amber-500' : 'bg-emerald-500')}`;
 
   document.getElementById('fg-ndvi-status').textContent = state.stacNoScene
-    ? `Sem leitura terrestre (${state.ndviCurrent.toFixed(2)})`
+    ? 'Coberto por Nuvens'
     : (state.ndviCurrent < 0.30
-      ? `Terra Descoberta (${state.ndviCurrent.toFixed(2)})`
-      : (state.ndviCurrent < 0.55 ? `Verde Médio (${state.ndviCurrent.toFixed(2)})` : `Bem Verde (${state.ndviCurrent.toFixed(2)})`));
+      ? 'Terra Descoberta'
+      : (state.ndviCurrent < 0.55 ? 'Verde Médio' : 'Bem Verde'));
 
   const ndviPill = document.getElementById('fg-ndvi-pill');
-  ndviPill.textContent = state.stacNoScene ? 'Água/Nuvem' : (state.ndviCurrent < 0.30 ? 'Exposta' : 'Saudável');
+  ndviPill.textContent = state.stacNoScene ? 'Nuvem' : (state.ndviCurrent < 0.30 ? 'Exposta' : 'Saudável');
   ndviPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${state.stacNoScene ? 'bg-slate-200 text-slate-800' : (state.ndviCurrent < 0.30 ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200/80 text-emerald-950')}`;
 
   const tempDisplay = state.liveTempMaxToday ?? state.nasaTemp;
-  document.getElementById('fg-temp').textContent = `${tempDisplay.toFixed(1)} °C`;
+  document.getElementById('fg-temp').textContent = `${tempDisplay.toFixed(0)} °C`;
   document.getElementById('fg-rain').textContent = state.liveRainNext7d !== undefined
-    ? `${state.nasaRain.toLocaleString('pt-BR')} mm (Próx 7d: ${state.liveRainNext7d} mm)`
-    : `${state.nasaRain.toLocaleString('pt-BR')} mm`;
+    ? `${Math.round(state.liveRainNext7d)} mm (7 dias)`
+    : `${state.nasaRain.toLocaleString('pt-BR')} mm/ano`;
 
   document.getElementById('val-smap').textContent = `${smapVal}% vol (${pctCad}% da CAD na raiz)`;
   document.getElementById('val-ndvi').textContent = state.stacLive && state.stacDate
@@ -1150,17 +1150,46 @@ function useDeviceGPS() {
 // REPORT & MODALS
 // ============================================================================
 function openReportModal() {
+  const isSimple = experienceMode === 'produtor';
   const p = getFarmProfile();
   const chosen = state.scenarios.find(s => s.id === state.selectedScenarioId) || state.scenarios[0];
   const resiliencePct = state.lastResilience[chosen.id] ?? 91;
   const fut = state.lastFuturesCalc || calculateScenarioLossAndFutures(chosen.id);
+
+  if (isSimple) {
+    const simpleAlertsBlock = state.lastNasaAlerts && state.lastNasaAlerts.alerts.length
+      ? `\n🛰️ *SITUAÇÃO DA LAVOURA HOJE:*\n` +
+        state.lastNasaAlerts.alerts.map(a => `${a.icon} *${a.simpleTitle || a.title}*\n   👉 O que fazer hoje: ${a.simpleAction || a.actions[0]}`).join('\n') + '\n'
+      : '';
+
+    const simpleReportText = `🌱 *MEU PLANO DE SAFRA — AGROCYCLE AI*
+----------------------------------------
+📍 *Propriedade:* ${state.locationLabel} (${formatArea(state.areaHa)})
+🌾 *Plantação:* ${fut.cropName} (${p.irrigation === 'irrigado' ? 'Com Irrigação' : 'Só Chuva'})
+${simpleAlertsBlock}
+✅ *O QUE PLANTAR (${chosen.title.toUpperCase()}):*
+1️⃣ ${chosen.cycles[0].period}: *${chosen.cycles[0].crop}*
+2️⃣ ${chosen.cycles[1].period}: *${chosen.cycles[1].crop}*
+3️⃣ ${chosen.cycles[2].period}: *${chosen.cycles[2].crop}*
+
+💰 *RESULTADO ESTIMADO:*
+• Sobra estimada na propriedade: *R$ ${fut.netProfitBrl.toLocaleString('pt-BR')}* (R$ ${fut.netProfitHa.toLocaleString('pt-BR')}/ha)
+• Economia estimada com adubo: *R$ ${chosen.ureaSaved}/ha*
+• Proteção da colheita: *${resiliencePct}%*
+
+💡 *Resumo:* ${chosen.plainExplain}`;
+
+    document.getElementById('report-content').textContent = simpleReportText;
+    document.getElementById('report-modal').classList.remove('hidden');
+    return;
+  }
 
   const nasaReportBlock = state.lastNasaAlerts && state.lastNasaAlerts.alerts.length
     ? `\n🛰️ *AVISOS ATIVOS DA NASA HOJE (${state.lastNasaAlerts.stageCode} • ${state.lastNasaAlerts.dap} DAP | Raiz ${state.lastNasaAlerts.zCm} cm):*\n` +
       state.lastNasaAlerts.alerts.map(a => `${a.icon} *${a.title}*\n   • Ação hoje: ${a.actions[0]}`).join('\n') + '\n'
     : '';
 
-  const reportText = `🌱 *PLANO SIMPLES DE SAFRA — AGROCYCLE AI*
+  const reportText = `🌱 *RELATÓRIO TÉCNICO DE SAFRA — AGROCYCLE AI*
 ----------------------------------------
 📍 *Local:* ${state.locationLabel}
 📐 *Tamanho:* ${formatArea(state.areaHa)}
@@ -1529,6 +1558,7 @@ function updateNasaCropAlertsUI() {
   const listEl = document.getElementById('nasa-active-alerts-list');
   if (!listEl) return;
 
+  const isSimple = experienceMode === 'produtor';
   const p = getFarmProfile();
   const eff = getEffectiveOrbitalMetrics();
 
@@ -1561,48 +1591,62 @@ function updateNasaCropAlertsUI() {
 
   const titleEl = document.getElementById('saved-crop-header-title');
   if (titleEl) {
-    const irrLabel = p.irrigation === 'irrigado' ? 'Irrigado' : 'Sequeiro';
-    titleEl.textContent = `${report.cropName} • ${report.stageName} (${report.dap} DAP) • ${state.locationLabel} (${formatArea(state.areaHa)} • ${irrLabel})`;
+    const irrLabel = p.irrigation === 'irrigado' ? 'Irrigado' : 'Só Chuva';
+    titleEl.textContent = isSimple
+      ? `${report.cropName} • ${report.stageName} (${report.dap} dias) • ${state.locationLabel}`
+      : `${report.cropName} • ${report.stageCode} (${report.dap} DAP) • ${state.locationLabel} (${formatArea(state.areaHa)} • ${irrLabel})`;
   }
 
   const phenoEl = document.getElementById('saved-crop-phenology-summary');
   if (phenoEl) {
-    phenoEl.innerHTML = `
-      <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">🌱 Estágio: ${report.stageCode} (${report.dap} dias)</span>
-      <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">📏 Raiz ativa: ${report.zCm} cm</span>
-      <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">💧 Coef. Cultura (Kc): ${report.kc.toFixed(2).replace('.', ',')}</span>
-      <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">☀️ Consumo hoje (ETc): ${report.etcToday.toFixed(2).replace('.', ',')} mm/dia</span>
-    `;
+    if (isSimple) {
+      const waterLabel = report.pctCad <= 50 ? 'Pouca água' : (report.pctCad < 65 ? 'Umidade média' : 'Boa umidade');
+      phenoEl.innerHTML = `
+        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">💧 Terra hoje: ${waterLabel}</span>
+        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">🌡️ Clima hoje: ${report.liveTemp.toFixed(0)} °C</span>
+        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">🌧️ Chuva próx. 7 dias: ${Math.round(report.liveRain7d)} mm</span>
+      `;
+    } else {
+      phenoEl.innerHTML = `
+        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">🌱 Estágio: ${report.stageCode} (${report.dap} dias)</span>
+        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">📏 Raiz ativa: ${report.zCm} cm</span>
+        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">💧 Coef. Cultura (Kc): ${report.kc.toFixed(2).replace('.', ',')}</span>
+        <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">☀️ Consumo hoje (ETc): ${report.etcToday.toFixed(2).replace('.', ',')} mm/dia</span>
+      `;
+    }
   }
 
   const gridEl = document.getElementById('nasa-live-telemetry-grid');
   if (gridEl) {
-    gridEl.innerHTML = `
-      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-        <div class="text-[10px] font-bold uppercase text-slate-500">Água na Raiz Hoje</div>
-        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.armMm} / ${report.cadMm} mm (${report.pctCad}%)</div>
-      </div>
-      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-        <div class="text-[10px] font-bold uppercase text-slate-500">Umidade 0–7 cm</div>
-        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.soilMoisturePct}% vol</div>
-      </div>
-      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-        <div class="text-[10px] font-bold uppercase text-slate-500">Temp. Hoje / Mín 7d</div>
-        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveTemp.toFixed(1)} °C / ${report.liveTmin.toFixed(1)} °C</div>
-      </div>
-      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-        <div class="text-[10px] font-bold uppercase text-slate-500">Radiação Solar Hoje</div>
-        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveSolar.toFixed(1)} MJ/m²/d</div>
-      </div>
-      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-        <div class="text-[10px] font-bold uppercase text-slate-500">Chuva Prevista (7d)</div>
-        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveRain7d} mm</div>
-      </div>
-      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
-        <div class="text-[10px] font-bold uppercase text-slate-500">NDVI Sentinel-2</div>
-        <div class="text-sm font-extrabold text-emerald-800 mt-0.5">${report.ndviVal.toFixed(2)} ${state.stacDate ? `(${state.stacDate})` : ''}</div>
-      </div>
-    `;
+    gridEl.classList.toggle('hidden', isSimple);
+    if (!isSimple) {
+      gridEl.innerHTML = `
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+          <div class="text-[10px] font-bold uppercase text-slate-500">Água na Raiz Hoje</div>
+          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.armMm} / ${report.cadMm} mm (${report.pctCad}%)</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+          <div class="text-[10px] font-bold uppercase text-slate-500">Umidade 0–7 cm</div>
+          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.soilMoisturePct}% vol</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+          <div class="text-[10px] font-bold uppercase text-slate-500">Temp. Hoje / Mín 7d</div>
+          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveTemp.toFixed(1)} °C / ${report.liveTmin.toFixed(1)} °C</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+          <div class="text-[10px] font-bold uppercase text-slate-500">Radiação Solar Hoje</div>
+          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveSolar.toFixed(1)} MJ/m²/d</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+          <div class="text-[10px] font-bold uppercase text-slate-500">Chuva Prevista (7d)</div>
+          <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveRain7d} mm</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+          <div class="text-[10px] font-bold uppercase text-slate-500">NDVI Sentinel-2</div>
+          <div class="text-sm font-extrabold text-emerald-800 mt-0.5">${report.ndviVal.toFixed(2)} ${state.stacDate ? `(${state.stacDate})` : ''}</div>
+        </div>
+      `;
+    }
   }
 
   listEl.innerHTML = report.alerts.map(alert => {
@@ -1627,6 +1671,21 @@ function updateNasaCropAlertsUI() {
       }
     };
     const st = styleMap[alert.severity] || styleMap.otimo;
+
+    if (isSimple) {
+      return `
+        <div class="p-4 rounded-2xl border-2 ${st.box} space-y-2 transition-all">
+          <div class="flex items-center gap-2.5">
+            <span class="text-xl leading-none">${alert.icon}</span>
+            <h3 class="text-sm sm:text-base font-extrabold ${st.title}">${alert.simpleTitle || alert.title}</h3>
+          </div>
+          <p class="text-xs sm:text-sm text-slate-700">${alert.simpleSummary || ''}</p>
+          <div class="p-3 rounded-xl ${st.actionBox} border text-xs sm:text-sm text-slate-900">
+            <strong>🚜 O que fazer hoje:</strong> ${alert.simpleAction || alert.actions[0]}
+          </div>
+        </div>
+      `;
+    }
 
     return `
       <div class="p-4 rounded-2xl border-2 ${st.box} space-y-3 transition-all">
