@@ -211,19 +211,22 @@ async function fetchNasaAnnualHistory(lat, lon) {
 }
 
 async function fetchLiveSoilAndWeatherState(lat, lon) {
-  try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStr = bonusToISODate(today);
-    const startWeather = bonusAddDays(today, -90);
-    const endWeather = bonusAddDays(today, 7);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayStr = bonusToISODate(today);
+  const startWeather = bonusAddDays(today, -90);
+  const endWeather = bonusAddDays(today, 7);
 
-    const [soil, weather] = await Promise.all([
-      bonusFetchSoilProperties(lat, lon),
-      bonusFetchWeatherData(lat, lon, bonusToISODate(startWeather), bonusToISODate(endWeather))
-    ]);
-
+  // Dispara SoilGrids em paralelo apenas para o motor de risco da Etapa 3, sem travar a leitura de umidade de hoje
+  bonusFetchSoilProperties(lat, lon).then(soil => {
     state.realSoil = soil;
+    if (typeof runAgroShieldBonus === 'function') {
+      runAgroShieldBonus();
+    }
+  }).catch(() => {});
+
+  try {
+    const weather = await bonusFetchWeatherData(lat, lon, bonusToISODate(startWeather), bonusToISODate(endWeather));
     state.realWeather = weather;
 
     if (weather && typeof weather.currentTemp === 'number' && !isNaN(weather.currentTemp)) {

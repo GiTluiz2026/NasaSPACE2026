@@ -357,6 +357,7 @@ function updateCoordinatesAndFetchOrbital(lat, lon, polygonLatLngs, label, isCus
   state.locationSelected = true;
   state.locationLabel = label;
   state.realSmapMoisture = null;
+  state.realHistory = null;
   state.liveTempToday = null;
   state.nasaLive = false;
   state.stacLive = false;
