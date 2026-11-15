@@ -325,23 +325,29 @@ function selectPresetRegion(key) {
     map.setView([preset.lat, preset.lon], preset.zoom);
     drawFieldPolygon(preset.polygon);
   }
-  setSatellitesLoadingState();
-  updateDiagnosticUI();
-  updateHistoricalChart();
   runSimulation();
   updateCoordinatesAndFetchOrbital(preset.lat, preset.lon, preset.polygon, preset.name, false);
 }
 
 function setSatellitesLoadingState() {
   const waterStatus = document.getElementById('fg-water-status');
+  const waterPill = document.getElementById('fg-water-pill');
   const ndviStatus = document.getElementById('fg-ndvi-status');
   const ndviPill = document.getElementById('fg-ndvi-pill');
+  const fgTemp = document.getElementById('fg-temp');
+  const fgRain = document.getElementById('fg-rain');
   if (waterStatus) waterStatus.textContent = "Calculando umidade...";
+  if (waterPill) {
+    waterPill.textContent = "Buscando...";
+    waterPill.className = "px-2.5 py-1 rounded-full text-xs font-extrabold bg-slate-200 text-slate-700 animate-pulse";
+  }
   if (ndviStatus) ndviStatus.textContent = "Lendo imagem de satélite...";
   if (ndviPill) {
     ndviPill.textContent = "Buscando...";
     ndviPill.className = "px-2.5 py-1 rounded-full text-xs font-extrabold bg-slate-200 text-slate-700 animate-pulse";
   }
+  if (fgTemp) fgTemp.textContent = "Buscando...";
+  if (fgRain) fgRain.textContent = "Buscando...";
 }
 
 function updateCoordinatesAndFetchOrbital(lat, lon, polygonLatLngs, label, isCustom = true) {
@@ -350,11 +356,19 @@ function updateCoordinatesAndFetchOrbital(lat, lon, polygonLatLngs, label, isCus
   state.isCustomLocation = isCustom;
   state.locationSelected = true;
   state.locationLabel = label;
+  state.realSmapMoisture = null;
+  state.liveTempToday = null;
+  state.nasaLive = false;
+  state.stacLive = false;
+  state.loadingSoilMoisture = true;
+  state.loadingStac = true;
+  state.loadingClimate = true;
   updateLocationVisibility();
   document.getElementById('coords-display').textContent = `Lat: ${lat.toFixed(4)}° | Lon: ${lon.toFixed(4)}°`;
   setSatellitesLoadingState();
   fetchNasaPowerClimatology(lat, lon);
   fetchPlanetaryComputerNDVI(polygonLatLngs || state.currentPolygon);
+  fetchLiveSoilAndWeatherState(lat, lon);
   updateHistoricalChart();
 }
 
@@ -404,33 +418,42 @@ function updateDiagnosticUI() {
   document.getElementById('metric-bh').textContent = `${eff.waterBalance >= 0 ? '+' : ''}${eff.waterBalance} mm`;
 
   const smapVal = eff.smapMoisture;
-  const smapPct = Math.max(10, Math.min(95, Math.round((smapVal / 32) * 100)));
-  document.getElementById('fg-water-bar').style.width = `${smapPct}%`;
-  document.getElementById('fg-water-bar').className = `h-full rounded-full transition-all duration-500 ${smapVal < 16 ? 'bg-rose-500' : (smapVal < 22 ? 'bg-amber-500' : 'bg-emerald-500')}`;
-  document.getElementById('fg-water-status').textContent = smapVal < 16
-    ? `Terra Seca (${smapVal}%)`
-    : (smapVal < 22 ? `Umidade Média (${smapVal}%)` : `Boa Umidade (${smapVal}%)`);
-  const wPill = document.getElementById('fg-water-pill');
-  wPill.textContent = smapVal < 16 ? 'Alerta' : (smapVal < 22 ? 'Atenção' : 'Ótimo');
-  wPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${smapVal < 16 ? 'bg-rose-200 text-rose-950' : (smapVal < 22 ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200 text-emerald-950')}`;
+  if (!state.loadingSoilMoisture) {
+    const smapPct = Math.max(10, Math.min(95, Math.round((smapVal / 32) * 100)));
+    document.getElementById('fg-water-bar').style.width = `${smapPct}%`;
+    document.getElementById('fg-water-bar').className = `h-full rounded-full transition-all duration-500 ${smapVal < 16 ? 'bg-rose-500' : (smapVal < 22 ? 'bg-amber-500' : 'bg-emerald-500')}`;
+    document.getElementById('fg-water-status').textContent = smapVal < 16
+      ? `Terra Seca (${smapVal}%)`
+      : (smapVal < 22 ? `Umidade Média (${smapVal}%)` : `Boa Umidade (${smapVal}%)`);
+    const wPill = document.getElementById('fg-water-pill');
+    wPill.textContent = smapVal < 16 ? 'Alerta' : (smapVal < 22 ? 'Atenção' : 'Ótimo');
+    wPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${smapVal < 16 ? 'bg-rose-200 text-rose-950' : (smapVal < 22 ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200 text-emerald-950')}`;
+  }
 
-  const ndviPct = Math.max(8, Math.min(98, Math.round(state.ndviCurrent * 100)));
-  const ndviBar = document.getElementById('fg-ndvi-bar');
-  ndviBar.style.width = `${ndviPct}%`;
-  ndviBar.className = `h-full rounded-full transition-all duration-500 ${state.ndviCurrent < 0.30 ? 'bg-rose-500' : (state.ndviCurrent < 0.50 ? 'bg-amber-500' : 'bg-emerald-500')}`;
+  if (!state.loadingStac) {
+    const ndviPct = Math.max(8, Math.min(98, Math.round(state.ndviCurrent * 100)));
+    const ndviBar = document.getElementById('fg-ndvi-bar');
+    ndviBar.style.width = `${ndviPct}%`;
+    ndviBar.className = `h-full rounded-full transition-all duration-500 ${state.ndviCurrent < 0.30 ? 'bg-rose-500' : (state.ndviCurrent < 0.50 ? 'bg-amber-500' : 'bg-emerald-500')}`;
 
-  document.getElementById('fg-ndvi-status').textContent = state.stacNoScene
-    ? `Sem leitura terrestre (${state.ndviCurrent.toFixed(2)})`
-    : (state.ndviCurrent < 0.30
-      ? `Terra Descoberta (${state.ndviCurrent.toFixed(2)})`
-      : (state.ndviCurrent < 0.55 ? `Verde Médio (${state.ndviCurrent.toFixed(2)})` : `Bem Verde (${state.ndviCurrent.toFixed(2)})`));
+    document.getElementById('fg-ndvi-status').textContent = state.stacNoScene
+      ? `Sem leitura terrestre (${state.ndviCurrent.toFixed(2)})`
+      : (state.ndviCurrent < 0.30
+        ? `Terra Descoberta (${state.ndviCurrent.toFixed(2)})`
+        : (state.ndviCurrent < 0.55 ? `Verde Médio (${state.ndviCurrent.toFixed(2)})` : `Bem Verde (${state.ndviCurrent.toFixed(2)})`));
 
-  const ndviPill = document.getElementById('fg-ndvi-pill');
-  ndviPill.textContent = state.stacNoScene ? 'Água/Nuvem' : (state.ndviCurrent < 0.30 ? 'Exposta' : 'Saudável');
-  ndviPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${state.stacNoScene ? 'bg-slate-200 text-slate-800' : (state.ndviCurrent < 0.30 ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200/80 text-emerald-950')}`;
+    const ndviPill = document.getElementById('fg-ndvi-pill');
+    ndviPill.textContent = state.stacNoScene ? 'Água/Nuvem' : (state.ndviCurrent < 0.30 ? 'Exposta' : 'Saudável');
+    ndviPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${state.stacNoScene ? 'bg-slate-200 text-slate-800' : (state.ndviCurrent < 0.30 ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200/80 text-emerald-950')}`;
+  }
 
-  document.getElementById('fg-temp').textContent = `${state.nasaTemp.toFixed(1)} °C`;
-  document.getElementById('fg-rain').textContent = `${state.nasaRain.toLocaleString('pt-BR')} mm`;
+  const displayTemp = typeof state.liveTempToday === 'number' ? state.liveTempToday : state.nasaTemp;
+  if (!state.loadingSoilMoisture || !state.loadingClimate) {
+    document.getElementById('fg-temp').textContent = `${displayTemp.toFixed(1)} °C`;
+  }
+  if (!state.loadingClimate) {
+    document.getElementById('fg-rain').textContent = `${state.nasaRain.toLocaleString('pt-BR')} mm`;
+  }
 
   document.getElementById('val-smap').textContent = `${smapVal}% vol (${eff.smapDelta > 0 ? '+' : ''}${eff.smapDelta}%)`;
   document.getElementById('val-ndvi').textContent = state.stacLive && state.stacDate

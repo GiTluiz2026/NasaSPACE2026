@@ -118,6 +118,7 @@ async function fetchPlanetaryComputerNDVI(polygonLatLngs) {
     if (stacBadge) stacBadge.textContent = "STAC: Cache Regional";
   }
 
+  state.loadingStac = false;
   renderNdviMapLayer();
   updateDiagnosticUI();
   runSimulation();
@@ -159,10 +160,10 @@ async function fetchNasaPowerClimatology(lat, lon) {
     state.nasaLive = false;
     if (statusBadge) statusBadge.textContent = "NASA POWER: Cache Regional";
   }
+  state.loadingClimate = false;
   updateDiagnosticUI();
   runSimulation();
   fetchNasaAnnualHistory(lat, lon);
-  fetchLiveSoilAndWeatherState(lat, lon);
 }
 
 async function fetchNasaAnnualHistory(lat, lon) {
@@ -225,8 +226,15 @@ async function fetchLiveSoilAndWeatherState(lat, lon) {
     state.realSoil = soil;
     state.realWeather = weather;
 
+    if (weather && typeof weather.currentTemp === 'number' && !isNaN(weather.currentTemp)) {
+      state.liveTempToday = Number(weather.currentTemp.toFixed(1));
+    }
+
     if (weather && Array.isArray(weather.rows) && weather.rows.length > 0) {
       const todayRow = weather.rows.find(r => r.date === todayStr) || weather.rows[weather.rows.length - 1];
+      if (!state.liveTempToday && todayRow && typeof todayRow.temperature_mean === 'number' && !isNaN(todayRow.temperature_mean)) {
+        state.liveTempToday = Number(todayRow.temperature_mean.toFixed(1));
+      }
       if (todayRow && typeof todayRow.satellite_soil_moisture === 'number' && !isNaN(todayRow.satellite_soil_moisture)) {
         const smPct = todayRow.satellite_soil_moisture <= 1.0
           ? Number((todayRow.satellite_soil_moisture * 100).toFixed(1))
@@ -237,13 +245,15 @@ async function fetchLiveSoilAndWeatherState(lat, lon) {
         }
       }
     }
-
+  } catch (_) {
+  } finally {
+    state.loadingSoilMoisture = false;
     updateDiagnosticUI();
     runSimulation();
     if (typeof runAgroShieldBonus === 'function') {
       runAgroShieldBonus();
     }
-  } catch (_) {}
+  }
 }
 
 
@@ -294,12 +304,12 @@ async function bonusFetchSoilProperties(lat, lon) {
 }
 
 async function bonusFetchWeatherData(lat, lon, startDateStr, endDateStr) {
-  const cacheKey = `agroshield_weather_${lat.toFixed(3)}_${lon.toFixed(3)}_${startDateStr}_${endDateStr}`;
+  const cacheKey = `agroshield_weather_v2_${lat.toFixed(3)}_${lon.toFixed(3)}_${startDateStr}_${endDateStr}`;
   try {
     const cached = localStorage.getItem(cacheKey);
     if (cached) {
       const parsed = JSON.parse(cached);
-      if (Date.now() - parsed.ts < 3600 * 1000) return parsed;
+      if (Date.now() - parsed.ts < 1800 * 1000) return parsed;
     }
   } catch {}
 
@@ -308,7 +318,8 @@ async function bonusFetchWeatherData(lat, lon, startDateStr, endDateStr) {
   url.searchParams.set('longitude', lon);
   url.searchParams.set('start_date', startDateStr);
   url.searchParams.set('end_date', endDateStr);
-  url.searchParams.set('daily', 'precipitation_sum,et0_fao_evapotranspiration');
+  url.searchParams.set('current', 'temperature_2m');
+  url.searchParams.set('daily', 'precipitation_sum,et0_fao_evapotranspiration,temperature_2m_mean');
   url.searchParams.set('hourly', 'soil_moisture_0_to_7cm');
   url.searchParams.set('timezone', 'America/Sao_Paulo');
 
@@ -335,17 +346,20 @@ async function bonusFetchWeatherData(lat, lon, startDateStr, endDateStr) {
     const dTimes = data?.daily?.time || [];
     const dRain = data?.daily?.precipitation_sum || [];
     const dEto = data?.daily?.et0_fao_evapotranspiration || [];
+    const dTemp = data?.daily?.temperature_2m_mean || [];
     const rows = dTimes.map((dateStr, idx) => {
       const smArr = hourlyByDay[dateStr];
       return {
         date: dateStr,
         precipitation_sum: dRain[idx] ?? 0,
         et0_fao_evapotranspiration: dEto[idx] ?? 0,
+        temperature_mean: dTemp[idx] ?? null,
         satellite_soil_moisture: smArr && smArr.length ? smArr.reduce((a, b) => a + b, 0) / smArr.length : null
       };
     });
 
-    const payload = { rows, source: 'Open-Meteo', ts: Date.now() };
+    const currentTemp = typeof data?.current?.temperature_2m === 'number' ? data.current.temperature_2m : null;
+    const payload = { rows, currentTemp, source: 'Open-Meteo', ts: Date.now() };
     try { localStorage.setItem(cacheKey, JSON.stringify(payload)); } catch {}
     return payload;
   } catch {
