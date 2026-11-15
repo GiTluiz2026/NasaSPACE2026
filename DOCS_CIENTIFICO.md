@@ -224,6 +224,17 @@ O sistema opera em arquitetura **Offline-First Híbrida**: realiza chamadas ass�
 
 ---
 
+### 3.9. Monitoramento Contínuo de Lavoura Gravada & Avisos Inteligentes da NASA
+- **Funções**: [`computeNasaCropAlerts`](./backend/engine/agronomic-engine.js) e [`getCropPhenologyStage`](./backend/engine/agronomic-engine.js) com persistência em `localStorage` ([`saveCurrentCropToBrowser`](./frontend/js/ui.js) e [`loadSavedCropFromBrowser`](./frontend/js/ui.js)).
+- **Progressão Fenológica Automática ($\text{DAP}$ Dinâmico)**: Ao gravar a lavoura, o sistema armazena a data de plantio derivada ($\text{Data}_{\text{plantio}} = \text{Hoje} - \text{DAP}$) e recalcula automaticamente a idade da planta ($\text{DAP}_{\text{atual}}$), a profundidade efetiva da raiz $Z_r(\text{DAP})$ e o coeficiente de cultura $K_c(\text{DAP})$ a cada novo acesso.
+- **Regras de Disparo de Avisos e Recomendações de Manejo Hoje**:
+  1. **🔴 Déficit Hídrico na Raiz ($\text{ARM} \le 50\%\;\text{CAD}$)**: Calcula a lâmina exata de reposição para irrigação ($\text{Lâmina} = \text{CAD} - \text{ARM}$, em $\text{mm}$), recomenda suspensão imediata de ureia em cobertura (evitando perdas $>35\%$ por volatilização de $\text{NH}_3$) e trava de novas CPRs.
+  2. **🟠 Onda de Calor e Radiação Solar Alta (`NASA POWER T2M` & `ALLSKY_SFC_SW_DWN`)**: Calcula a demanda evaporativa diária ($\text{ET}_c = \text{ET}_0 \times K_c$) e bloqueia janelas de pulverização entre 10h e 16h para evitar evaporação de gota e fitotoxidez térmica.
+  3. **🔵 Risco de Frio Intenso / Geada (`NASA POWER T2M_MIN` $\le 6{,}0\text{ °C}$)**: Orienta proteção por calor latente via irrigação noturna, suspensão de herbicidas pós-emergentes e manutenção da superfície do solo sem revolvimento.
+  4. **🟣 Queda de Vigor Fotossintético (`Sentinel-2 L2A NDVI` $< \text{NDVI}_{\text{mín}}(\text{DAP})$)**: Dispara recomendação de vistoria dirigida às manchas amarelas/vermelhas do mapa para controle localizado de pragas de solo, nematoides ou deficiência nutricional.
+
+---
+
 ## 4. Referências, Embasamento Científico e Links Oficiais (NASA & Agências Parceiras)
 
 ### 🛰️ 4.1. Portais, Missões e Publicações Oficiais da NASA (`nasa.gov`)
