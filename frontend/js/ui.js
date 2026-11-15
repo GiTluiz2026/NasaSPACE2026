@@ -1523,6 +1523,7 @@ function refreshLiveNasaTelemetry() {
   fetchPlanetaryComputerNDVI(state.currentPolygon);
   fetchRealtimeHydroAndSoil(state.lat, state.lon);
 }
+window.refreshLiveNasaTelemetry = refreshLiveNasaTelemetry;
 
 function updateNasaCropAlertsUI() {
   const listEl = document.getElementById('nasa-active-alerts-list');
