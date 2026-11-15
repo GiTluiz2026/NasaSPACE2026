@@ -629,9 +629,12 @@ function renderSimpleDecisionCard() {
   `).join('');
 
   const totalMargin = Math.round(chosen.projectedMarginValue * state.areaHa);
-  document.getElementById('simple-total-margin').textContent = `R$ ${totalMargin.toLocaleString('pt-BR')}`;
-  document.getElementById('simple-unit-margin').textContent = `R$ ${chosen.projectedMarginValue.toLocaleString('pt-BR')} por hectare (${formatArea(state.areaHa)})`;
-  document.getElementById('simple-urea-saved').textContent = `R$ ${chosen.ureaSaved}/ha (Total: R$ ${Math.round(chosen.ureaSaved * state.areaHa).toLocaleString('pt-BR')})`;
+  const elTotalMargin = document.getElementById('simple-total-margin');
+  if (elTotalMargin) elTotalMargin.textContent = `R$ ${totalMargin.toLocaleString('pt-BR')}`;
+  const elUnitMargin = document.getElementById('simple-unit-margin');
+  if (elUnitMargin) elUnitMargin.textContent = `R$ ${chosen.projectedMarginValue.toLocaleString('pt-BR')} por hectare (${formatArea(state.areaHa)})`;
+  const elUreaSaved = document.getElementById('simple-urea-saved');
+  if (elUreaSaved) elUreaSaved.textContent = `R$ ${chosen.ureaSaved}/ha (Total: R$ ${Math.round(chosen.ureaSaved * state.areaHa).toLocaleString('pt-BR')})`;
 }
 
 function toggleComparePlansModal() {
@@ -1663,6 +1666,7 @@ function saveBrapiToken() {
 }
 
 function initMarketPanel() {
+  if (!document.getElementById('market-exchange-card')) return;
   const tokenInput = document.getElementById('market-brapi-token');
   if (tokenInput && typeof getSavedBrapiToken === 'function') {
     tokenInput.value = getSavedBrapiToken();

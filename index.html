@@ -778,66 +778,6 @@
             </div>
           </div>
 
-          <!-- BOLSA DE VALORES & COMMODITIES (B3 / CÂMBIO / CBOT) -->
-          <div id="market-exchange-card" class="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="text-sm font-extrabold text-slate-900">📈 Bolsa de Valores &amp; Commodities (B3 / Câmbio / CBOT)</span>
-                  <span id="market-status-pill" class="px-2 py-0.5 rounded-full bg-slate-200 text-slate-800 text-[10px] font-extrabold uppercase">Referência</span>
-                </div>
-                <p class="text-xs text-slate-600 mt-0.5">Cotações de câmbio, futuros agrícolas convertidos para R$ e ações do agronegócio na B3 em tempo real (100% compatível com GitHub Pages).</p>
-              </div>
-              <div class="flex items-center gap-2 self-start sm:self-center">
-                <span id="market-updated-at" class="text-[11px] font-semibold text-slate-500">--:--</span>
-                <button type="button" id="btn-refresh-market" onclick="refreshMarketQuotes()" class="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold transition cursor-pointer shrink-0">
-                  🔄 Atualizar Bolsa
-                </button>
-              </div>
-            </div>
-
-            <!-- Barra de Câmbio & IBOVESPA -->
-            <div id="market-macro-bar" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <!-- Preenchido via ui.js -->
-            </div>
-
-            <!-- Grid Duplo: Commodities Agrícolas & Ações B3 -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <!-- Commodities -->
-              <div class="p-3.5 rounded-2xl bg-white border border-slate-200 space-y-2.5">
-                <div class="flex items-center justify-between">
-                  <span class="text-xs font-extrabold uppercase text-slate-700">🌾 Commodities Agrícolas (Paridade R$)</span>
-                  <span class="text-[10px] font-semibold text-slate-500">Clique p/ usar no simulador</span>
-                </div>
-                <div id="market-commodities-list" class="divide-y divide-slate-100">
-                  <!-- Preenchido via ui.js -->
-                </div>
-              </div>
-
-              <!-- Ações B3 -->
-              <div class="p-3.5 rounded-2xl bg-white border border-slate-200 space-y-2.5">
-                <div class="flex items-center justify-between gap-2 flex-wrap">
-                  <span class="text-xs font-extrabold uppercase text-slate-700">🏛️ Ações da B3 (Agro &amp; Mercado)</span>
-                  <div class="flex items-center gap-1.5">
-                    <input type="text" id="market-add-ticker" maxlength="10" placeholder="Ex: BBAS3" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomB3Ticker();}" class="w-24 rounded-lg border border-slate-300 bg-slate-50 px-2 py-1 text-[11px] font-bold uppercase text-slate-900 focus:outline-none focus:border-emerald-600">
-                    <button type="button" onclick="addCustomB3Ticker()" class="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-extrabold transition cursor-pointer">+ Ativo</button>
-                  </div>
-                </div>
-                <div id="market-stocks-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <!-- Preenchido via ui.js -->
-                </div>
-                <details class="pt-1">
-                  <summary class="text-[11px] font-semibold text-slate-500 cursor-pointer hover:text-slate-800">🔑 Configurar token gratuito Brapi.dev (opcional p/ todos os papéis da B3)</summary>
-                  <div class="mt-2 flex items-center gap-2">
-                    <input type="password" id="market-brapi-token" placeholder="Cole seu token brapi.dev" class="flex-1 rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-1 text-xs text-slate-900 focus:outline-none focus:border-emerald-600">
-                    <button type="button" onclick="saveBrapiToken()" class="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer">Salvar</button>
-                  </div>
-                  <p class="text-[10px] text-slate-500 mt-1">Salvo apenas localmente no seu navegador (localStorage). Sem token, câmbio e ações públicas funcionam normalmente com fallback offline para os demais papéis.</p>
-                </details>
-              </div>
-            </div>
-          </div>
-
           <!-- BÔNUS ADICIONAL: PREVISÃO E ESTIMATIVA HÍDRICA DIÁRIA (AGRO SHIELD) -->
           <div id="bonus-agroshield-card" class="p-4 sm:p-5 rounded-2xl bg-sky-50/70 border border-sky-200 space-y-4">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -1038,10 +978,10 @@
   <!-- ===================================================================== -->
   <!-- MODULAR SCRIPTS (BACKEND ENGINE + FRONTEND UI)                        -->
   <!-- ===================================================================== -->
-  <script src="backend/engine/presets.js?v=20261115b"></script>
-  <script src="backend/engine/agronomic-engine.js?v=20261115b"></script>
-  <script src="backend/engine/orbital-services.js?v=20261115b"></script>
-  <script src="backend/engine/market-services.js?v=20261115b"></script>
-  <script src="frontend/js/ui.js?v=20261115b"></script>
+  <script src="backend/engine/presets.js?v=20261115c"></script>
+  <script src="backend/engine/agronomic-engine.js?v=20261115c"></script>
+  <script src="backend/engine/orbital-services.js?v=20261115c"></script>
+  <script src="backend/engine/market-services.js?v=20261115c"></script>
+  <script src="frontend/js/ui.js?v=20261115c"></script>
 </body>
 </html>
