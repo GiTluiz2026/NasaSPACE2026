@@ -176,24 +176,53 @@ Implementado em `calculateScenarioLossAndFutures` (`frontend/js/ui.js`) e `/api/
 
 ---
 
-## 📚 Embasamento Científico e Referências Bibliográficas
+## 📚 Embasamento Científico e Links Oficiais (NASA & Agências Parceiras)
 
-1. **FAO-56 (Evapotranspiração e Coeficientes de Cultura $K_c$)**:
-   - ALLEN, R. G.; PEREIRA, L. S.; RAES, D.; SMITH, M. *Crop evapotranspiration — Guidelines for computing crop water requirements*. **FAO Irrigation and Drainage Paper 56**. Rome: FAO, 1998.
-   - HARGREAVES, G. H.; SAMANI, Z. A. Reference crop evapotranspiration from temperature. **Applied Engineering in Agriculture**, v. 1, n. 2, p. 96–99, 1985.
-2. **FAO-33 & FAO-66 (Resposta da Produtividade à Água e Fator $K_y$)**:
-   - DOORENBOS, J.; KASSAM, A. H. *Yield response to water*. **FAO Irrigation and Drainage Paper 33**. Rome: FAO, 1979.
-   - STEDUTO, P.; HSIAO, T. C.; FERERES, E.; RAES, D. *Crop yield response to water*. **FAO Irrigation and Drainage Paper 66**. Rome: FAO, 2012.
-3. **ZARC — Zoneamento Agrícola de Risco Climático (Grupos de Solo e AD)**:
-   - TEIXEIRA, W. G. et al. *Retenção de água no solo e classificação em grupos de disponibilidade hídrica para o ZARC*. **Embrapa Solos / MAPA**, 2021.
-4. **ISRIC SoilGrids v2.0 (Modelagem Digital Global de Solos)**:
-   - POGGIO, L. et al. SoilGrids 2.0: producing soil information for the globe with quantified spatial uncertainty. **Soil**, v. 7, n. 1, p. 217–240, 2021.
-5. **NASA POWER (Climatologia Agroclimática MERRA-2 & CERES)**:
-   - SPARKS, A. H. nasapower: a NASA POWER Global Meteorology, Surface Solar Energy and Climatology Data Client. **Journal of Open Source Software**, v. 3, n. 30, p. 1035, 2018.
-6. **Sentinel-2 L2A & Índice de Vegetação NDVI**:
-   - ROUSE, J. W. et al. Monitoring vegetation systems in the Great Plains with ERTS. **NASA SP-351**, p. 309–317, 1974.
-   - DRUSCH, M. et al. Sentinel-2: ESA's Optical High-Resolution Mission for GMES Operational Services. **Remote Sensing of Environment**, v. 120, p. 25–36, 2012.
-7. **Geodésia Esférica (Cálculo de Área de Polígonos Terrestres)**:
-   - CHAMBERLAIN, R. G.; DUQUETTE, W. H. *Some algorithms for polygons on a sphere*. **JPL Publication 07-03**, NASA Jet Propulsion Laboratory, 2007.
-8. **Fixação Biológica de Nitrogênio e Cobertura do Solo**:
-   - HUNGRIA, M.; CAMPO, R. J.; MENDES, I. C. A importância do processo de fixação biológica do nitrogênio para a cultura da soja. **Embrapa Soja**, Documentos 283, 2007.
+### 🛰️ 1. Portais, Missões e Publicações Oficiais da NASA (`nasa.gov`)
+
+1. **NASA POWER — Prediction Of Worldwide Energy Resources (MERRA-2 & CERES)**
+   - **Portal Oficial NASA**: [https://power.larc.nasa.gov/](https://power.larc.nasa.gov/)
+   - **Documentação Metodológica Agroclimatológica**: [https://power.larc.nasa.gov/docs/methodology/](https://power.larc.nasa.gov/docs/methodology/)
+   - **Endpoint Consumido**: `https://power.larc.nasa.gov/api/temporal/climatology/point?parameters=T2M,T2M_MIN,PRECTOTCORR,ALLSKY_SFC_SW_DWN&community=AG`
+   - **Referência**: SPARKS, A. H. *nasapower: a NASA POWER Global Meteorology, Surface Solar Energy and Climatology Data Client*. **Journal of Open Source Software**, v. 3, n. 30, p. 1035, 2018.
+
+2. **NASA NTRS — Publicação Original da Fórmula do NDVI (`NASA SP-351`)**
+   - **Documento Oficial no Servidor Técnico da NASA**: [https://ntrs.nasa.gov/citations/19740022614](https://ntrs.nasa.gov/citations/19740022614)
+   - **Referência**: ROUSE, J. W. et al. *Monitoring vegetation systems in the Great Plains with ERTS*. **Third Earth Resources Technology Satellite-1 Symposium**, NASA SP-351, p. 309–317, 1974.
+
+3. **NASA JPL — Geodésia Esférica para Cálculo de Área de Polígonos (`JPL Publication 07-03`)**
+   - **Repositório Técnico NASA Jet Propulsion Laboratory**: [https://trs.jpl.nasa.gov/handle/2014/40409](https://trs.jpl.nasa.gov/handle/2014/40409)
+   - **Referência**: CHAMBERLAIN, R. G.; DUQUETTE, W. H. *Some algorithms for polygons on a sphere*. **JPL Publication 07-03**, Jet Propulsion Laboratory, NASA, Pasadena, CA, 2007.
+
+4. **NASA SMAP — Soil Moisture Active Passive & Assimilação Orbital**
+   - **Portal Oficial da Missão no NASA JPL**: [https://smap.jpl.nasa.gov/](https://smap.jpl.nasa.gov/)
+   - **NASA Earthdata Agriculture & Water**: [https://www.earthdata.nasa.gov/](https://www.earthdata.nasa.gov/)
+
+---
+
+### 🌍 2. Agências Científicas, Orbitais e Normativas Parceiras (FAO, ESA, ISRIC & Embrapa)
+
+5. **FAO / ONU — Evapotranspiração ($\text{ET}_0$, $K_c$) e Resposta da Produtividade à Água (Fator $K_y$)**
+   - **Portal Oficial FAO Land & Water**: [https://www.fao.org/land-water/databases-and-software/crop-information/en/](https://www.fao.org/land-water/databases-and-software/crop-information/en/)
+   - **FAO-56**: ALLEN, R. G.; PEREIRA, L. S.; RAES, D.; SMITH, M. *Crop evapotranspiration — Guidelines for computing crop water requirements*. **FAO Irrigation and Drainage Paper 56**. Rome: FAO, 1998. ([Texto Oficial FAO-56](https://www.fao.org/4/x0490e/x0490e00.htm))
+   - **Hargreaves-Samani**: HARGREAVES, G. H.; SAMANI, Z. A. *Reference crop evapotranspiration from temperature*. **Applied Engineering in Agriculture**, v. 1, n. 2, p. 96–99, 1985.
+   - **FAO-33 & FAO-66**: DOORENBOS, J.; KASSAM, A. H. *Yield response to water*. **FAO Irrigation and Drainage Paper 33**, 1979; STEDUTO, P. et al. **FAO Paper 66**, 2012. ([Portal FAO-66](https://www.fao.org/4/i2800e/i2800e00.htm))
+
+6. **ESA Copernicus Sentinel-2 L2A & Microsoft Planetary Computer STAC**
+   - **Catálogo Oficial STAC Sentinel-2 L2A**: [https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a](https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a)
+   - **Portal ESA Sentinel-2**: [https://sentiwiki.copernicus.eu/web/s2-mission](https://sentiwiki.copernicus.eu/web/s2-mission)
+   - **Referência**: DRUSCH, M. et al. *Sentinel-2: ESA's Optical High-Resolution Mission for GMES Operational Services*. **Remote Sensing of Environment**, v. 120, p. 25–36, 2012.
+
+7. **ISRIC World Soil Information — SoilGrids v2.0 (Retenção Hídrica 33 kPa e 1500 kPa)**
+   - **Portal Oficial SoilGrids**: [https://soilgrids.org/](https://soilgrids.org/)
+   - **Documentação da API ISRIC**: [https://www.isric.org/explore/soilgrids/faq-soilgrids](https://www.isric.org/explore/soilgrids/faq-soilgrids)
+   - **Referência**: POGGIO, L. et al. *SoilGrids 2.0: producing soil information for the globe with quantified spatial uncertainty*. **Soil**, v. 7, n. 1, p. 217–240, 2021. ([Artigo Oficial](https://soil.copernicus.org/articles/7/217/2021/))
+
+8. **Embrapa & MAPA — Zoneamento Agrícola de Risco Climático (ZARC) e Fixação Biológica de N**
+   - **Portal Oficial ZARC (MAPA)**: [https://www.gov.br/agricultura/pt-br/assuntos/riscos-seguro/programa-nacional-de-zoneamento-agricola-de-risco-climatico](https://www.gov.br/agricultura/pt-br/assuntos/riscos-seguro/programa-nacional-de-zoneamento-agricola-de-risco-climatico)
+   - **Embrapa Solos (Grupos de Terra ZARC)**: [https://www.embrapa.br/solos](https://www.embrapa.br/solos) — TEIXEIRA, W. G. et al. *Retenção de água no solo e classificação em grupos de disponibilidade hídrica para o ZARC*, 2021.
+   - **Embrapa Soja (FBN e Economia de Ureia)**: [https://www.embrapa.br/soja](https://www.embrapa.br/soja) — HUNGRIA, M.; CAMPO, R. J.; MENDES, I. C. *A importância do processo de fixação biológica do nitrogênio para a cultura da soja*. Documentos 283, 2007.
+
+9. **Open-Meteo API (Previsão Meteorológica e Umidade Superficial Diária)**
+   - **Documentação Oficial Open-Meteo**: [https://open-meteo.com/en/docs](https://open-meteo.com/en/docs)
+
