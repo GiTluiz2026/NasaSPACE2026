@@ -1,4 +1,4 @@
-# 🌱 AgroCycle AI — Planejador de Safra, Balanço Hídrico & Vendas Futuras
+# 🌱 AgroCycle IA — Planejador de Safra, Balanço Hídrico & Vendas Futuras
 
 O **AgroCycle AI** é uma plataforma agrometeorológica e financeira *Offline-First* para planejamento de rotação/sucessão de culturas (3 safras), estimativa e previsão de água na raiz (7 dias), cálculo de quebra climática (FAO-33) e simulador de trava de safra / vendas futuras (CPR, Barter e Contrato Futuro).
 
