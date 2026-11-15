@@ -126,7 +126,7 @@ async function fetchPlanetaryComputerNDVI(polygonLatLngs) {
 
 async function fetchNasaPowerClimatology(lat, lon) {
   const statusBadge = document.getElementById('status-nasa-power');
-  const url = `https://power.larc.nasa.gov/api/temporal/climatology/point?parameters=T2M,T2M_MIN,PRECTOTCORR,ALLSKY_SFC_SW_DWN&community=AG&longitude=${lon.toFixed(4)}&latitude=${lat.toFixed(4)}&format=JSON`;
+  const url = `https://power.larc.nasa.gov/api/temporal/climatology/point?parameters=T2M,T2M_MIN,PRECTOTCORR,ALLSKY_SFC_SW_DWN,GWETTOP,GWETROOT&community=AG&longitude=${lon.toFixed(4)}&latitude=${lat.toFixed(4)}&format=JSON`;
   try {
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 6500);
@@ -139,12 +139,16 @@ async function fetchNasaPowerClimatology(lat, lon) {
     const tminMonthly = params.T2M_MIN ? Object.entries(params.T2M_MIN).filter(([k]) => k !== 'ANN').map(([, v]) => Number(v)) : [];
     const rainDaily = Number(params.PRECTOTCORR?.ANN);
     const solarAnn = Number(params.ALLSKY_SFC_SW_DWN?.ANN);
+    const gwetTopAnn = Number(params.GWETTOP?.ANN);
+    const gwetRootAnn = Number(params.GWETROOT?.ANN);
 
     if (!isNaN(tempAnn) && tempAnn > -50) {
       state.nasaTemp = Number(tempAnn.toFixed(1));
       state.nasaTmin = tminMonthly.length ? Number(Math.min(...tminMonthly).toFixed(1)) : Number((tempAnn - 10.5).toFixed(1));
       state.nasaRain = Math.round(rainDaily * 365);
       state.nasaSolar = Number(solarAnn.toFixed(1));
+      if (!isNaN(gwetTopAnn) && gwetTopAnn > 0) state.nasaGwetTop = gwetTopAnn;
+      if (!isNaN(gwetRootAnn) && gwetRootAnn > 0) state.nasaGwetRoot = gwetRootAnn;
       state.nasaLive = true;
       if (statusBadge) statusBadge.textContent = "NASA POWER: Online";
     } else {
@@ -167,23 +171,26 @@ async function fetchNasaPowerClimatology(lat, lon) {
 }
 
 async function fetchNasaAnnualHistory(lat, lon) {
-  const url = `https://power.larc.nasa.gov/api/temporal/annual/point?parameters=PRECTOTCORR,T2M,ALLSKY_SFC_SW_DWN&community=AG&longitude=${lon.toFixed(4)}&latitude=${lat.toFixed(4)}&start=2021&end=2025&format=JSON`;
+  const url = `https://power.larc.nasa.gov/api/temporal/monthly/point?parameters=GWETTOP,GWETROOT,PRECTOTCORR,T2M,ALLSKY_SFC_SW_DWN&community=AG&longitude=${lon.toFixed(4)}&latitude=${lat.toFixed(4)}&start=2021&end=2025&format=JSON`;
   try {
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 7000);
     const res = await fetch(url, { signal: ctrl.signal });
     clearTimeout(tid);
-    if (!res.ok) throw new Error('NASA Annual HTTP');
+    if (!res.ok) throw new Error('NASA Monthly/Annual HTTP');
     const data = await res.json();
+    const pGwetTop = data?.properties?.parameter?.GWETTOP || {};
     const pRain = data?.properties?.parameter?.PRECTOTCORR || {};
     const pTemp = data?.properties?.parameter?.T2M || {};
     const pSolar = data?.properties?.parameter?.ALLSKY_SFC_SW_DWN || {};
     const realHistory = {};
 
     ['2021', '2022', '2023', '2024', '2025'].forEach(yr => {
-      const rDay = Number(pRain[yr]);
-      const tVal = Number(pTemp[yr]);
-      const sVal = Number(pSolar[yr]);
+      const annKey = `${yr}13`;
+      const gwet = Number(pGwetTop[annKey] ?? pGwetTop[yr]);
+      const rDay = Number(pRain[annKey] ?? pRain[yr]);
+      const tVal = Number(pTemp[annKey] ?? pTemp[yr]);
+      const sVal = Number(pSolar[annKey] ?? pSolar[yr]);
       if (!isNaN(rDay) && rDay > 0 && !isNaN(tVal) && tVal > -40) {
         const rainMm = Math.round(rDay * 365);
         const solarMj = !isNaN(sVal) && sVal > 0 ? sVal : state.nasaSolar;
@@ -191,9 +198,12 @@ async function fetchNasaAnnualHistory(lat, lon) {
         const bh = computeWaterBalance(rainMm, et0);
         const ndviEst = estimateClimateNdvi(rainMm, tVal);
         const normBh = Math.max(-1.0, Math.min(1.0, bh / 1200));
-        const smapEst = Number(Math.max(8.0, Math.min(34.0, 20.5 + normBh * 8.5)).toFixed(1));
+        // Converte GWETTOP (grau de saturação 0-1 do NASA GMAO/SMAP-LDAS) para umidade volumétrica (% vol, porosidade efetiva ~36%)
+        const smapFromNasa = (!isNaN(gwet) && gwet > 0)
+          ? Number(Math.max(8.0, Math.min(36.0, gwet * 35.0)).toFixed(1))
+          : Number(Math.max(8.0, Math.min(34.0, 20.5 + normBh * 8.5)).toFixed(1));
         const bareEst = Math.round(Math.max(18, Math.min(200, 95 - (ndviEst * 75) - normBh * 25)));
-        realHistory[yr] = { smap: smapEst, ndvi: ndviEst, bare: bareEst, rainMm, tempC: Number(tVal.toFixed(1)) };
+        realHistory[yr] = { smap: smapFromNasa, ndvi: ndviEst, bare: bareEst, rainMm, tempC: Number(tVal.toFixed(1)) };
       }
     });
 
@@ -204,7 +214,9 @@ async function fetchNasaAnnualHistory(lat, lon) {
         bare: Math.round(Math.max(18, Math.min(200, 95 - ((state.ndviCurrent || 0.58) * 75))))
       };
       state.realHistory = realHistory;
-      updateDiagnosticUI();
+      if (Number(state.selectedYear) !== 2026) {
+        updateDiagnosticUI();
+      }
       updateHistoricalChart();
     }
   } catch (_) {}
