@@ -1203,7 +1203,7 @@ function openReportModal() {
   const resiliencePct = state.lastResilience[chosen.id] ?? 91;
   const fut = state.lastFuturesCalc || calculateScenarioLossAndFutures(chosen.id);
 
-  const reportText = `🌱 *PLANO SIMPLES DE SAFRA — AGROCYCLE AI*
+  const reportText = `🌱 *PLANO SIMPLES DE SAFRA — AGROCYCLE IA*
 ----------------------------------------
 📍 *Local:* ${state.locationLabel}
 📐 *Tamanho:* ${formatArea(state.areaHa)}
@@ -1229,7 +1229,7 @@ function openReportModal() {
 
 💡 *Resumo:* ${chosen.plainExplain}
 
-_Gerado pelo AgroCycle AI. Converse sempre com o técnico ou agrônomo da sua região antes do plantio._`;
+_Gerado pelo AgroCycle IA. Converse sempre com o técnico ou agrônomo da sua região antes do plantio._`;
 
   document.getElementById('report-content').textContent = reportText;
   document.getElementById('report-modal').classList.remove('hidden');
