@@ -1517,18 +1517,11 @@ function clearSavedCropFromBrowser() {
   showToast('Lavoura gravada removida do navegador.', 'amber');
 }
 
-function setNasaAlertSituation(mode) {
-  state.nasaAlertSituation = mode || 'auto';
-  ['auto', 'seca', 'calor', 'geada', 'ndvi_baixo'].forEach(key => {
-    const btn = document.getElementById(`nasa-sit-${key}`);
-    if (!btn) return;
-    if (key === state.nasaAlertSituation) {
-      btn.className = 'nasa-sit-btn px-2.5 py-1 rounded-lg border-2 border-emerald-600 bg-emerald-50 text-slate-900 text-[11px] font-extrabold cursor-pointer transition';
-    } else {
-      btn.className = 'nasa-sit-btn px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:border-emerald-400 text-slate-700 text-[11px] font-bold cursor-pointer transition';
-    }
-  });
-  updateNasaCropAlertsUI();
+function refreshLiveNasaTelemetry() {
+  showToast('Consultando dados reais de hoje (NASA POWER, Sentinel-2, SoilGrids e Open-Meteo)...', 'emerald');
+  fetchNasaPowerClimatology(state.lat, state.lon);
+  fetchPlanetaryComputerNDVI(state.currentPolygon);
+  fetchRealtimeHydroAndSoil(state.lat, state.lon);
 }
 
 function updateNasaCropAlertsUI() {
@@ -1537,20 +1530,9 @@ function updateNasaCropAlertsUI() {
 
   const p = getFarmProfile();
   const eff = getEffectiveOrbitalMetrics();
-  const rainDelta = Number(document.getElementById('stress-rain')?.value || 0);
-  const tempDelta = Number(document.getElementById('stress-temp')?.value || 0);
-  const frostActive = Boolean(document.getElementById('stress-frost')?.checked);
 
-  const report = computeNasaCropAlerts(
-    p,
-    eff,
-    state,
-    state.agroShield,
-    rainDelta,
-    tempDelta,
-    frostActive,
-    state.nasaAlertSituation || 'auto'
-  );
+  // Sem parâmetros de simulação: somente leitura real do dia
+  const report = computeNasaCropAlerts(p, eff, state);
   state.lastNasaAlerts = report;
 
   const badgeEl = document.getElementById('saved-crop-status-badge');
@@ -1569,6 +1551,13 @@ function updateNasaCropAlertsUI() {
     }
   }
 
+  const dateBadge = document.getElementById('nasa-live-date-badge');
+  if (dateBadge) {
+    const todayStr = bonusToISODate(new Date()).split('-').reverse().join('/');
+    const sourceStatus = state.realtimeLive || state.nasaLive ? '📡 Leitura Real Hoje' : '📡 Conectando Satélites';
+    dateBadge.textContent = `${sourceStatus} (${todayStr})`;
+  }
+
   const titleEl = document.getElementById('saved-crop-header-title');
   if (titleEl) {
     const irrLabel = p.irrigation === 'irrigado' ? 'Irrigado' : 'Sequeiro';
@@ -1582,6 +1571,36 @@ function updateNasaCropAlertsUI() {
       <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">📏 Raiz ativa: ${report.zCm} cm</span>
       <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">💧 Coef. Cultura (Kc): ${report.kc.toFixed(2).replace('.', ',')}</span>
       <span class="px-2.5 py-1 rounded-lg bg-slate-100 font-bold text-slate-800">☀️ Consumo hoje (ETc): ${report.etcToday.toFixed(2).replace('.', ',')} mm/dia</span>
+    `;
+  }
+
+  const gridEl = document.getElementById('nasa-live-telemetry-grid');
+  if (gridEl) {
+    gridEl.innerHTML = `
+      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+        <div class="text-[10px] font-bold uppercase text-slate-500">Água na Raiz Hoje</div>
+        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.armMm} / ${report.cadMm} mm (${report.pctCad}%)</div>
+      </div>
+      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+        <div class="text-[10px] font-bold uppercase text-slate-500">Umidade 0–7 cm</div>
+        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.soilMoisturePct}% vol</div>
+      </div>
+      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+        <div class="text-[10px] font-bold uppercase text-slate-500">Temp. Hoje / Mín 7d</div>
+        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveTemp.toFixed(1)} °C / ${report.liveTmin.toFixed(1)} °C</div>
+      </div>
+      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+        <div class="text-[10px] font-bold uppercase text-slate-500">Radiação Solar Hoje</div>
+        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveSolar.toFixed(1)} MJ/m²/d</div>
+      </div>
+      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+        <div class="text-[10px] font-bold uppercase text-slate-500">Chuva Prevista (7d)</div>
+        <div class="text-sm font-extrabold text-slate-900 mt-0.5">${report.liveRain7d} mm</div>
+      </div>
+      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+        <div class="text-[10px] font-bold uppercase text-slate-500">NDVI Sentinel-2</div>
+        <div class="text-sm font-extrabold text-emerald-800 mt-0.5">${report.ndviVal.toFixed(2)} ${state.stacDate ? `(${state.stacDate})` : ''}</div>
+      </div>
     `;
   }
 
@@ -1622,7 +1641,7 @@ function updateNasaCropAlertsUI() {
 
         <div class="grid grid-cols-1 md:grid-cols-12 gap-3 text-xs">
           <div class="md:col-span-5 p-3 rounded-xl ${st.actionBox} border space-y-1">
-            <div class="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">🛰️ O que os satélites da NASA detectaram</div>
+            <div class="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">🛰️ O que os satélites e sensores reais mostram hoje</div>
             <p class="text-slate-700 leading-relaxed">${alert.diagnosis}</p>
           </div>
           <div class="md:col-span-7 p-3 rounded-xl ${st.actionBox} border space-y-1.5">

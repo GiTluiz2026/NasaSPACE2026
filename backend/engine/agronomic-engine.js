@@ -284,150 +284,136 @@ function getCropPhenologyStage(cultura, dap) {
   return { code: 'Maturação', name: 'Maturação de Colheita', critical: false };
 }
 
-function computeNasaCropAlerts(p, eff, currentState, shield, stressRainPct = 0, stressTempDelta = 0, frostActive = false, forcedSituation = 'auto') {
+function computeNasaCropAlerts(p, eff, currentState) {
   const cropCfg = CROP_ECONOMICS[p.crop] || CROP_ECONOMICS.soja;
   const dap = Number(p.dap ?? 20);
   const stage = getCropPhenologyStage(p.crop, dap);
   const { kc, zCm } = obterParametrosCulturaAgroShield(p.crop, dap);
 
-  const baseLiveTemp = currentState.liveTempMaxToday ?? currentState.nasaTemp;
-  const baseLiveTmin = currentState.liveTempMin7d ?? currentState.nasaTmin;
-  const baseLiveSolar = currentState.liveSolarToday ?? currentState.nasaSolar;
+  // Calcula o balanço hídrico estritamente com os dados reais do dia (sem deltas de simulação)
+  const realShield = computeAgroShieldDecision(p, eff, currentState, 0, 0);
 
-  const effectiveTemp = Number((baseLiveTemp + stressTempDelta).toFixed(1));
-  const effectiveTmin = frostActive ? 1.8 : Number((baseLiveTmin + stressTempDelta * 0.5).toFixed(1));
-  const effectiveSolar = Number((baseLiveSolar + (stressTempDelta > 1.5 ? 2.4 : 0)).toFixed(1));
+  const liveTemp = Number((currentState.liveTempMaxToday ?? currentState.nasaTemp).toFixed(1));
+  const liveTmin = Number((currentState.liveTempMin7d ?? currentState.nasaTmin).toFixed(1));
+  const liveSolar = Number((currentState.liveSolarToday ?? currentState.nasaSolar).toFixed(1));
+  const liveRain7d = Number((currentState.liveRainNext7d ?? (currentState.nasaRain / 52)).toFixed(1));
   const et0Today = currentState.liveEtoToday
-    ? Number((currentState.liveEtoToday * (1 + Math.max(0, stressTempDelta) * 0.045)).toFixed(2))
-    : computeEt0HargreavesSamani(effectiveTemp, effectiveSolar);
+    ? Number(currentState.liveEtoToday.toFixed(2))
+    : computeEt0HargreavesSamani(liveTemp, liveSolar);
   const etcToday = Number((et0Today * kc).toFixed(2));
 
-  let pctCad = shield ? shield.pctCad : 68;
-  let armMm = shield ? shield.armMm : 32;
-  let cadMm = shield ? shield.cadMm : 48;
-  let diasAteSeca = shield ? shield.diasAteSeca : 9;
-  let ndviVal = currentState.ndviCurrent || 0.62;
-
-  if (forcedSituation === 'seca') {
-    pctCad = 36;
-    armMm = Number((cadMm * 0.36).toFixed(1));
-    diasAteSeca = 2;
-  } else if (forcedSituation === 'calor') {
-    pctCad = Math.min(pctCad, 54);
-  } else if (forcedSituation === 'ndvi_baixo') {
-    ndviVal = 0.27;
-  }
+  const pctCad = realShield.pctCad;
+  const armMm = realShield.armMm;
+  const cadMm = realShield.cadMm;
+  const diasAteSeca = realShield.diasAteSeca;
+  const ndviVal = Number((currentState.ndviCurrent || 0.62).toFixed(2));
+  const soilMoisturePct = Number((eff.smapMoisture || 21.4).toFixed(1));
 
   const expectedNdviMin = dap < 18 ? 0.22 : (dap <= 85 ? 0.52 : 0.35);
   const laminaReposicaoMm = Math.max(8, Math.round(cadMm - armMm));
   const alerts = [];
 
-  // 1. Alerta Hídrico na Zona Radicular (NASA SMAP + SoilGrids + FAO-56)
-  if (pctCad <= 50 || forcedSituation === 'seca') {
+  // 1. Alerta Hídrico Real na Zona Radicular (Open-Meteo + SoilGrids + FAO-56)
+  if (pctCad <= 50) {
     alerts.push({
       id: 'water_deficit',
       severity: 'critico',
       icon: '🔴',
-      badge: `NASA SMAP + FAO-56 • ARM ${armMm} mm / CAD ${cadMm} mm (${pctCad}%)`,
-      title: `Déficit Hídrico na Raiz (${cropCfg.name} aos ${dap} DAP — ${stage.name})`,
-      diagnosis: `A reserva de água nos ${Math.round(zCm)} cm de raiz caiu para ${pctCad}% da Capacidade de Água Disponível (CAD), enquanto a planta consome ${etcToday} mm/dia (Kc = ${kc.toFixed(2)}). ${stage.critical ? 'A lavoura está em fase crítica de definição de produtividade!' : 'O crescimento radicular pode travar se faltar umidade.'}`,
+      badge: `Leitura Real • ARM ${armMm} mm / CAD ${cadMm} mm (${pctCad}%)`,
+      title: `Déficit Hídrico Real na Raiz (${cropCfg.name} aos ${dap} DAP — ${stage.name})`,
+      diagnosis: `A reserva real de água nos ${Math.round(zCm)} cm de raiz está em ${pctCad}% da Capacidade de Água Disponível (CAD), com umidade superficial de ${soilMoisturePct}% vol e consumo da planta em ${etcToday} mm/dia (Kc = ${kc.toFixed(2)}).`,
       actions: [
         p.irrigation === 'irrigado'
           ? `Ligar irrigação nas próximas 24–48h aplicando lâmina de reposição de ${laminaReposicaoMm} mm para elevar a raiz (${Math.round(zCm)} cm) à Capacidade de Campo.`
-          : `Sistema em sequeiro: suspender movimentação de solo e manter palhada intacta (reduz evaporação superficial em até 38%).`,
+          : `Sistema em sequeiro: manter palhada intacta sobre o solo (reduz perda por evaporação em até 38%) e evitar movimentação de terra.`,
         `Adubação: NÃO aplicar ureia em cobertura hoje — com solo a ${pctCad}% da CAD, a perda por volatilização de amônia (NH₃) ultrapassa 35%.`,
-        `Comercialização (CPR/Barter): Segurar novas travas futuras até a entrada da próxima frente de chuva.`
+        `Comercialização (CPR/Barter): Segurar novas travas futuras até a confirmação da próxima chuva (${liveRain7d} mm previstos nos próximos 7 dias).`
       ]
     });
-  } else if (diasAteSeca <= 6) {
+  } else if (realShield.alertaIrrigacao && diasAteSeca <= 6) {
     alerts.push({
       id: 'water_warning',
       severity: 'atencao',
       icon: '🟡',
-      badge: `Open-Meteo + SoilGrids • Reserva p/ ${diasAteSeca} dias (${pctCad}% CAD)`,
+      badge: `Previsão Real 7d • Reserva p/ ${diasAteSeca} dias (${pctCad}% CAD)`,
       title: `Atenção Hídrica: Umidade entra no limite crítico em ${diasAteSeca} dias`,
-      diagnosis: `Com evapotranspiração da cultura (ETc) em ${etcToday} mm/dia nos ${Math.round(zCm)} cm de raiz, a água facilmente disponível se esgota em cerca de ${diasAteSeca} dias se não chover.`,
+      diagnosis: `Hoje o solo possui ${armMm} mm (${pctCad}% da CAD), mas com consumo real (ETc) de ${etcToday} mm/dia nos ${Math.round(zCm)} cm de raiz e previsão de ${liveRain7d} mm de chuva nos próximos 7 dias, a reserva útil cai abaixo de 50% em ${diasAteSeca} dias.`,
       actions: [
         p.irrigation === 'irrigado'
           ? `Programar turno de rega preventivo de ${Math.max(10, Math.round(etcToday * 3))} mm antes que o armazenamento caia abaixo de 50% da CAD.`
           : `Aproveitar a umidade atual (${pctCad}% da CAD) caso precise realizar tratos culturais nos próximos ${Math.max(1, diasAteSeca - 2)} dias.`,
-        `Monitorar previsão de chuva de 7 dias no gráfico hidrológico do Passo 3.`
+        `Acompanhar a evolução diária da água na raiz no gráfico de 7 dias do Passo 3.`
       ]
     });
   }
 
-  // 2. Alerta Térmico de Onda de Calor e Radiação Solar (NASA POWER T2M + ALLSKY_SFC_SW_DWN)
-  if (effectiveTemp >= 28.5 || stressTempDelta >= 2.0 || forcedSituation === 'calor') {
-    const displayTemp = forcedSituation === 'calor' ? Math.max(33.4, effectiveTemp + 4.5).toFixed(1) : effectiveTemp.toFixed(1);
-    const displaySolar = forcedSituation === 'calor' ? Math.max(23.8, effectiveSolar + 3.2).toFixed(1) : effectiveSolar.toFixed(1);
+  // 2. Alerta Térmico Real (NASA POWER + Open-Meteo Temperatura Máxima e Radiação do Dia)
+  if (liveTemp >= 31.0) {
     alerts.push({
       id: 'heat_radiation',
       severity: 'atencao',
       icon: '🟠',
-      badge: `NASA POWER • T2M ${displayTemp} °C | Radiação ${displaySolar} MJ/m²/d`,
-      title: `Estresse Térmico e Alta Demanda Evaporativa em ${cropCfg.name} (${stage.code})`,
-      diagnosis: `Os sensores orbitais NASA POWER (CERES / MERRA-2) indicam forte radiação solar incidente (${displaySolar} MJ/m²/dia) e temperatura elevada, acelerando a demanda atmosférica (ET₀ = ${et0Today} mm/dia) e o risco de abortamento floral.`,
+      badge: `NASA POWER + Open-Meteo • Máx Hoje: ${liveTemp.toFixed(1)} °C | Radiação: ${liveSolar.toFixed(1)} MJ/m²`,
+      title: `Alta Temperatura e Demanda Evaporativa Hoje em ${cropCfg.name} (${stage.code})`,
+      diagnosis: `A telemetria meteorológica registra máxima de ${liveTemp.toFixed(1)} °C e radiação solar de ${liveSolar.toFixed(1)} MJ/m²/dia hoje, elevando a evapotranspiração de referência (ET₀ = ${et0Today} mm/dia).`,
       actions: [
-        `Janela de Pulverização: PROIBIDO aplicar defensivos/foliares entre 10h00 e 16h00 (alta evaporação da gota e fitotoxidez por temperatura).`,
-        `Aplicar somente no início da manhã (até 09h) ou período noturno com umidade relativa > 55%.`,
+        `Janela de Pulverização: Evitar aplicação de defensivos/foliares entre 10h00 e 16h00 hoje devido à alta evaporação da gota.`,
+        `Priorizar aplicações no início da manhã (até 09h) ou período noturno com umidade relativa > 55%.`,
         stage.critical
-          ? `Fase reprodutiva (${stage.code}): considerar aplicação de bioestimulantes/aminoácidos ou potássio foliar para mitigação de estresse oxidativo.`
-          : `Manter cobertura morta sobre a entrelinha para reduzir a temperatura superficial do solo em até 4 °C.`
+          ? `Fase reprodutiva (${stage.code}): monitorar retenção de flores/vagens sob calor intenso.`
+          : `Manter cobertura vegetal na entrelinha para conservação térmica da raiz.`
       ]
     });
   }
 
-  // 3. Alerta de Risco de Frio Intenso / Geada (NASA POWER T2M_MIN)
-  if (frostActive || effectiveTmin <= 6.0 || forcedSituation === 'geada') {
-    const displayTmin = forcedSituation === 'geada' ? '1,8' : effectiveTmin.toFixed(1).replace('.', ',');
+  // 3. Alerta Real de Frio Intenso / Geada nos Próximos 7 Dias (T2M_MIN)
+  if (liveTmin <= 6.0) {
     alerts.push({
       id: 'frost_risk',
       severity: 'critico',
       icon: '🔵',
-      badge: `NASA POWER T2M_MIN • Mínima Crítica: ${displayTmin} °C`,
-      title: `Alerta de Frio Intenso / Risco de Geada para ${cropCfg.name}`,
-      diagnosis: `A climatologia de temperatura mínima a 2 metros (NASA POWER T2M_MIN) aponta risco de resfriamento radiativo severo (${displayTmin} °C) na região do talhão durante a fase ${stage.name}.`,
+      badge: `Mínima Real Prevista: ${liveTmin.toFixed(1).replace('.', ',')} °C`,
+      title: `Alerta de Frio Intenso para ${cropCfg.name} (${stage.name})`,
+      diagnosis: `Os dados meteorológicos apontam temperatura mínima de ${liveTmin.toFixed(1).replace('.', ',')} °C na região do talhão durante a fase ${stage.name}.`,
       actions: [
         p.irrigation === 'irrigado'
-          ? `Defesa Ativa: Em noite de geada, acionar irrigação por aspersão na madrugada para proteção térmica por liberação de calor latente da água.`
-          : `Evitar qualquer revolvimento do solo ou roçada antes da massa polar (solo úmido e compacto retém mais calor diurno).`,
-        `Não aplicar herbicidas pós-emergentes 48h antes ou 72h após o frio intenso devido à queda no metabolismo da planta.`,
-        `Se estiver planejando sucessão de inverno, priorizar Aveia Preta ou Trigo no lugar de milho safrinha tardio.`
+          ? `Em noite de frio severo (< 3 °C), acionar irrigação por aspersão na madrugada para proteção térmica por calor latente.`
+          : `Evitar revolvimento do solo ou roçada antes da passagem da massa de ar frio.`,
+        `Não aplicar herbicidas pós-emergentes 48h antes ou 72h após quedas bruscas de temperatura.`
       ]
     });
   }
 
-  // 4. Alerta de Anomalia de Vigor Vegetativo (Copernicus Sentinel-2 STAC NDVI)
-  if ((dap >= 20 && ndviVal < expectedNdviMin) || forcedSituation === 'ndvi_baixo') {
+  // 4. Alerta Real de Vigor Vegetativo (Copernicus Sentinel-2 STAC NDVI)
+  if (dap >= 20 && ndviVal < expectedNdviMin) {
     alerts.push({
       id: 'ndvi_drop',
       severity: 'atencao',
       icon: '🟣',
-      badge: `Sentinel-2 L2A (B08/B04) • NDVI Atual: ${ndviVal.toFixed(2)} (Esperado ≥ ${expectedNdviMin.toFixed(2)})`,
-      title: `Vigor Vegetativo (NDVI) Abaixo do Esperado aos ${dap} DAP`,
-      diagnosis: `A leitura óptica do satélite Sentinel-2 sobre o polígono mostra reflectância fotossintética (NDVI = ${ndviVal.toFixed(2)}) inferior ao padrão fenológico da cultura de ${cropCfg.name} na fase ${stage.code}.`,
+      badge: `Sentinel-2 L2A (B08/B04) • NDVI Real: ${ndviVal.toFixed(2)} (Esperado ≥ ${expectedNdviMin.toFixed(2)})`,
+      title: `Vigor Vegetativo (NDVI) no Talhão Abaixo do Esperado aos ${dap} DAP`,
+      diagnosis: `A leitura real do satélite Sentinel-2 sobre o polígono indica NDVI médio de ${ndviVal.toFixed(2)}, abaixo da referência fenológica (${expectedNdviMin.toFixed(2)}) para ${cropCfg.name} na fase ${stage.code}.`,
       actions: [
-        `Vistoria Dirigida no Mapa: Ativar a camada NDVI no mapa do Passo 1 e caminhar até as manchas amarelas/vermelhas do talhão.`,
-        `Inspecionar ataque inicial de pragas de solo/desfolhadoras, nematoides ou manchas de compactação/acidez (pH atual: ${p.ph}).`,
+        `Vistoria Dirigida no Mapa: Verificar no mapa do Passo 1 as zonas amarelas/vermelhas do talhão.`,
+        `Inspecionar presença localizada de pragas, nematoides, falhas de estande ou manchas de acidez (pH configurado: ${p.ph}).`,
         `Se confirmado amarelecimento nutricional e houver umidade no solo (> 60% CAD), realizar adubação nitrogenada ou foliar localizada.`
       ]
     });
   }
 
-  // 5. Condição Orbital Ideal (Quando não há alertas críticos)
-  if (alerts.length === 0 || forcedSituation === 'ideal') {
-    if (forcedSituation === 'ideal') alerts.length = 0;
+  // 5. Condição Real Favorável Hoje (Sem alertas críticos ativos no dia)
+  if (alerts.length === 0) {
     alerts.push({
       id: 'optimal_window',
       severity: 'otimo',
       icon: '🟢',
-      badge: `NASA POWER + Sentinel-2 • CAD ${pctCad}% | NDVI ${ndviVal.toFixed(2)} | ETc ${etcToday} mm/d`,
-      title: `Condições Orbitais Ideais para ${cropCfg.name} (${dap} DAP — ${stage.name})`,
-      diagnosis: `O cruzamento da NASA POWER com o Balanço Hídrico mostra raiz de ${Math.round(zCm)} cm bem suprida (${pctCad}% da CAD) e dossel saudável (NDVI ${ndviVal.toFixed(2)}). Consumo diário atual de ${etcToday} mm/dia.`,
+      badge: `Leitura Real Hoje • CAD ${pctCad}% (${armMm}/${cadMm} mm) | NDVI ${ndviVal.toFixed(2)} | ETc ${etcToday} mm/d`,
+      title: `Condições Reais Favoráveis Hoje para ${cropCfg.name} (${dap} DAP — ${stage.name})`,
+      diagnosis: `Os sensores reais do dia mostram raiz de ${Math.round(zCm)} cm suprida com ${armMm} mm de água (${pctCad}% da CAD), umidade superficial em ${soilMoisturePct}% vol, NDVI em ${ndviVal.toFixed(2)} e previsão de ${liveRain7d} mm de chuva para os próximos 7 dias.`,
       actions: [
-        `Janela Verde de Manejo: Umidade do solo e temperatura favoráveis para adubação em cobertura e aplicações fitossanitárias preventivas com alta absorção.`,
-        `Monitoramento: Próxima revisão crítica de umidade recomendada em ${Math.min(7, diasAteSeca)} dias.`,
-        `Segurança Comercial: Baixo risco físico atual — janela favorável para travar custos em contratos futuros respeitando o limite seguro do Passo 3.`
+        `Janela de Manejo Hoje: Boas condições de umidade no solo (${pctCad}% da CAD) e temperatura (${liveTemp.toFixed(1)} °C) para adubação em cobertura e tratos fitossanitários.`,
+        `Balanço Hídrico Real: Consumo atual da planta em ${etcToday} mm/dia (ET₀ = ${et0Today} mm/dia × Kc = ${kc.toFixed(2)}).`,
+        `Comercialização: Lavoura operando dentro dos parâmetros normais de campo.`
       ]
     });
   }
@@ -445,6 +431,11 @@ function computeNasaCropAlerts(p, eff, currentState, shield, stressRainPct = 0, 
     armMm,
     cadMm,
     ndviVal,
+    soilMoisturePct,
+    liveTemp,
+    liveTmin,
+    liveSolar,
+    liveRain7d,
     alerts
   };
 }
