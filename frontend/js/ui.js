@@ -1361,6 +1361,245 @@ async function runAgroShieldBonus() {
 }
 
 // ============================================================================
+// BOLSA DE VALORES & COMMODITIES (B3 / CÂMBIO / CBOT)
+// ============================================================================
+let currentMarketData = null;
+
+function formatMarketChangeBadge(pct) {
+  const val = Number(pct || 0);
+  const sign = val > 0 ? '+' : '';
+  const cls = val > 0
+    ? 'bg-emerald-100 text-emerald-800'
+    : (val < 0 ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-700');
+  return `<span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold ${cls}">${sign}${val.toFixed(2).replace('.', ',')}%</span>`;
+}
+
+function renderMarketPanel(data) {
+  if (!data) return;
+  currentMarketData = data;
+
+  const statusPill = document.getElementById('market-status-pill');
+  const updatedEl = document.getElementById('market-updated-at');
+  if (statusPill) {
+    if (data.isLiveFx && data.isLiveB3) {
+      statusPill.textContent = 'Ao Vivo (Câmbio + B3)';
+      statusPill.className = 'px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-extrabold uppercase';
+    } else if (data.isLiveFx) {
+      statusPill.textContent = 'Câmbio Ao Vivo';
+      statusPill.className = 'px-2 py-0.5 rounded-full bg-sky-100 text-sky-900 text-[10px] font-extrabold uppercase';
+    } else {
+      statusPill.textContent = 'Referência Offline';
+      statusPill.className = 'px-2 py-0.5 rounded-full bg-slate-200 text-slate-800 text-[10px] font-extrabold uppercase';
+    }
+  }
+  if (updatedEl) {
+    updatedEl.textContent = data.updatedAt ? `Atualizado às ${data.updatedAt}` : 'Modo Offline';
+  }
+
+  // 1. Macro Bar: USD/BRL, EUR/BRL e IBOVESPA
+  const macroBar = document.getElementById('market-macro-bar');
+  if (macroBar) {
+    const ibov = (data.stocks || []).find(s => s.symbol === '^BVSP') || { symbol: '^BVSP', shortName: 'IBOVESPA', price: 127850, changePct: 0.54, isLive: false };
+    const usd = data.fx?.USD || { code: 'USD/BRL', name: 'Dólar Comercial', bid: 5.78, pctChange: 0 };
+    const eur = data.fx?.EUR || { code: 'EUR/BRL', name: 'Euro Comercial', bid: 6.14, pctChange: 0 };
+
+    macroBar.innerHTML = `
+      <div class="p-3 rounded-2xl bg-white border border-slate-200 flex items-center justify-between">
+        <div>
+          <div class="text-[10px] font-extrabold uppercase text-slate-500">💵 ${usd.name}</div>
+          <div class="text-base font-extrabold text-slate-900 mt-0.5">R$ ${usd.bid.toFixed(2).replace('.', ',')}</div>
+        </div>
+        <div class="text-right space-y-1">
+          ${formatMarketChangeBadge(usd.pctChange)}
+          <div class="text-[10px] text-slate-400 font-semibold">${data.isLiveFx ? 'AwesomeAPI' : 'Offline'}</div>
+        </div>
+      </div>
+      <div class="p-3 rounded-2xl bg-white border border-slate-200 flex items-center justify-between">
+        <div>
+          <div class="text-[10px] font-extrabold uppercase text-slate-500">💶 ${eur.name}</div>
+          <div class="text-base font-extrabold text-slate-900 mt-0.5">R$ ${eur.bid.toFixed(2).replace('.', ',')}</div>
+        </div>
+        <div class="text-right space-y-1">
+          ${formatMarketChangeBadge(eur.pctChange)}
+          <div class="text-[10px] text-slate-400 font-semibold">${data.isLiveFx ? 'AwesomeAPI' : 'Offline'}</div>
+        </div>
+      </div>
+      <div class="p-3 rounded-2xl bg-white border border-slate-200 flex items-center justify-between">
+        <div>
+          <div class="text-[10px] font-extrabold uppercase text-slate-500">🏛️ IBOVESPA (B3)</div>
+          <div class="text-base font-extrabold text-slate-900 mt-0.5">${ibov.price ? Math.round(ibov.price).toLocaleString('pt-BR') + ' pts' : '-'}</div>
+        </div>
+        <div class="text-right space-y-1">
+          ${formatMarketChangeBadge(ibov.changePct)}
+          <div class="text-[10px] text-slate-400 font-semibold">${ibov.isLive ? 'B3 Ao Vivo' : 'Referência'}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 2. Commodities List
+  const commList = document.getElementById('market-commodities-list');
+  if (commList) {
+    commList.innerHTML = (data.commodities || []).map(c => {
+      const canApply = Boolean(c.cropKey);
+      return `
+        <div class="py-2 flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <div class="text-xs font-extrabold text-slate-900 truncate">${c.name}</div>
+            <div class="text-[10px] text-slate-500">${c.exchange} • Ref: ${c.intlQuote} ${c.intlUnit}</div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <div class="text-right">
+              <div class="text-xs font-extrabold text-slate-900">R$ ${Number(c.priceBrl).toLocaleString('pt-BR')} <span class="text-[10px] font-semibold text-slate-500">/${c.unit}</span></div>
+              <div>${formatMarketChangeBadge(c.pctChange)}</div>
+            </div>
+            ${canApply ? `
+              <button type="button" onclick="applyMarketPriceToFutures('${c.cropKey}', ${c.priceBrl})" class="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-900 text-[10px] font-extrabold transition cursor-pointer" title="Aplicar cotação no simulador de vendas futuras">
+                Usar
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // 3. B3 Stocks Grid (excluindo ^BVSP que já está no macro bar)
+  const stocksList = document.getElementById('market-stocks-list');
+  if (stocksList) {
+    const customSaved = typeof getSavedCustomTickers === 'function' ? getSavedCustomTickers() : [];
+    const stocks = (data.stocks || []).filter(s => s.symbol !== '^BVSP');
+    stocksList.innerHTML = stocks.map(s => {
+      const isCustom = customSaved.includes(s.symbol);
+      const priceText = typeof s.price === 'number'
+        ? `R$ ${s.price.toFixed(2).replace('.', ',')}`
+        : 'Indisponível';
+      return `
+        <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs font-extrabold text-slate-900">${s.symbol}</span>
+              ${s.isLive ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Cotação ao vivo"></span>' : ''}
+              ${isCustom ? `<button type="button" onclick="removeCustomB3Ticker('${s.symbol}')" class="text-[10px] text-slate-400 hover:text-rose-600 font-bold cursor-pointer" title="Remover ativo">✕</button>` : ''}
+            </div>
+            <div class="text-[10px] text-slate-500 truncate">${s.shortName}</div>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-xs font-extrabold text-slate-900">${priceText}</div>
+            <div>${formatMarketChangeBadge(s.changePct)}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+async function refreshMarketQuotes() {
+  const btn = document.getElementById('btn-refresh-market');
+  const pill = document.getElementById('market-status-pill');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Atualizando...';
+  }
+  if (pill) {
+    pill.textContent = 'Buscando...';
+    pill.className = 'px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-extrabold uppercase';
+  }
+
+  try {
+    const customTickers = typeof getSavedCustomTickers === 'function' ? getSavedCustomTickers() : [];
+    const data = await fetchLiveMarketData(customTickers);
+    renderMarketPanel(data);
+  } catch (err) {
+    console.warn('Market refresh failed:', err);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔄 Atualizar Bolsa';
+    }
+  }
+}
+
+function applyMarketPriceToFutures(cropKey, priceBrl) {
+  if (!priceBrl || priceBrl <= 0) return;
+  const p = getSelectedScenarioParams();
+  if (p.crop !== cropKey) {
+    const cropSel = document.getElementById('sel-crop');
+    if (cropSel) {
+      cropSel.value = cropKey;
+      syncVisualButtonsFromSelects();
+      updateDiagnosticUI();
+      runSimulation();
+    }
+  }
+  const priceEl = document.getElementById('fut-price');
+  if (priceEl) {
+    priceEl.value = Math.round(priceBrl);
+    onFuturesInputChange();
+    const card = document.getElementById('loss-and-futures-card');
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function pullActiveCropPriceFromMarket() {
+  const p = getSelectedScenarioParams();
+  const commodities = currentMarketData?.commodities || [];
+  const match = commodities.find(c => c.cropKey === p.crop);
+  if (match && match.priceBrl) {
+    applyMarketPriceToFutures(p.crop, match.priceBrl);
+  } else {
+    const cfg = CROP_ECONOMICS[p.crop] || CROP_ECONOMICS.soja;
+    const priceEl = document.getElementById('fut-price');
+    if (priceEl) {
+      priceEl.value = cfg.price;
+      onFuturesInputChange();
+    }
+  }
+}
+
+function addCustomB3Ticker() {
+  const input = document.getElementById('market-add-ticker');
+  if (!input) return;
+  const raw = input.value.trim().toUpperCase().replace(/[^A-Z0-9.^]/g, '');
+  if (!raw) return;
+  const list = getSavedCustomTickers();
+  if (!list.includes(raw) && !DEFAULT_B3_TICKERS.includes(raw)) {
+    list.push(raw);
+    saveCustomTickersToStorage(list);
+  }
+  input.value = '';
+  refreshMarketQuotes();
+}
+
+function removeCustomB3Ticker(symbol) {
+  const list = getSavedCustomTickers().filter(t => t !== symbol);
+  saveCustomTickersToStorage(list);
+  refreshMarketQuotes();
+}
+
+function saveBrapiToken() {
+  const input = document.getElementById('market-brapi-token');
+  if (!input) return;
+  saveBrapiTokenToStorage(input.value);
+  refreshMarketQuotes();
+}
+
+function initMarketPanel() {
+  const tokenInput = document.getElementById('market-brapi-token');
+  if (tokenInput && typeof getSavedBrapiToken === 'function') {
+    tokenInput.value = getSavedBrapiToken();
+  }
+  if (typeof MARKET_FALLBACK !== 'undefined') {
+    const usd = MARKET_FALLBACK.fx.USD.bid;
+    renderMarketPanel({
+      ...MARKET_FALLBACK,
+      commodities: MARKET_FALLBACK.commodities.map(c => ({ ...c, priceBrl: c.calcBrl(usd) }))
+    });
+    refreshMarketQuotes();
+  }
+}
+
+// ============================================================================
 // BOOTSTRAP
 // ============================================================================
 window.addEventListener('DOMContentLoaded', () => {
@@ -1373,4 +1612,5 @@ window.addEventListener('DOMContentLoaded', () => {
   runSimulation();
   fetchNasaPowerClimatology(state.lat, state.lon);
   fetchPlanetaryComputerNDVI(state.currentPolygon);
+  initMarketPanel();
 });
