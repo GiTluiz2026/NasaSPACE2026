@@ -161,7 +161,91 @@ async function fetchNasaPowerClimatology(lat, lon) {
   }
   updateDiagnosticUI();
   runSimulation();
+  fetchNasaAnnualHistory(lat, lon);
+  fetchLiveSoilAndWeatherState(lat, lon);
 }
+
+async function fetchNasaAnnualHistory(lat, lon) {
+  const url = `https://power.larc.nasa.gov/api/temporal/annual/point?parameters=PRECTOTCORR,T2M,ALLSKY_SFC_SW_DWN&community=AG&longitude=${lon.toFixed(4)}&latitude=${lat.toFixed(4)}&start=2021&end=2025&format=JSON`;
+  try {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 7000);
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(tid);
+    if (!res.ok) throw new Error('NASA Annual HTTP');
+    const data = await res.json();
+    const pRain = data?.properties?.parameter?.PRECTOTCORR || {};
+    const pTemp = data?.properties?.parameter?.T2M || {};
+    const pSolar = data?.properties?.parameter?.ALLSKY_SFC_SW_DWN || {};
+    const realHistory = {};
+
+    ['2021', '2022', '2023', '2024', '2025'].forEach(yr => {
+      const rDay = Number(pRain[yr]);
+      const tVal = Number(pTemp[yr]);
+      const sVal = Number(pSolar[yr]);
+      if (!isNaN(rDay) && rDay > 0 && !isNaN(tVal) && tVal > -40) {
+        const rainMm = Math.round(rDay * 365);
+        const solarMj = !isNaN(sVal) && sVal > 0 ? sVal : state.nasaSolar;
+        const et0 = computeEt0HargreavesSamani(tVal, solarMj);
+        const bh = computeWaterBalance(rainMm, et0);
+        const ndviEst = estimateClimateNdvi(rainMm, tVal);
+        const normBh = Math.max(-1.0, Math.min(1.0, bh / 1200));
+        const smapEst = Number(Math.max(8.0, Math.min(34.0, 20.5 + normBh * 8.5)).toFixed(1));
+        const bareEst = Math.round(Math.max(18, Math.min(200, 95 - (ndviEst * 75) - normBh * 25)));
+        realHistory[yr] = { smap: smapEst, ndvi: ndviEst, bare: bareEst, rainMm, tempC: Number(tVal.toFixed(1)) };
+      }
+    });
+
+    if (Object.keys(realHistory).length > 0) {
+      realHistory['2026'] = {
+        smap: state.realSmapMoisture || realHistory['2025']?.smap || PRESETS[state.regionKey].smapMoisture,
+        ndvi: state.ndviCurrent || realHistory['2025']?.ndvi || 0.59,
+        bare: Math.round(Math.max(18, Math.min(200, 95 - ((state.ndviCurrent || 0.58) * 75))))
+      };
+      state.realHistory = realHistory;
+      updateDiagnosticUI();
+      updateHistoricalChart();
+    }
+  } catch (_) {}
+}
+
+async function fetchLiveSoilAndWeatherState(lat, lon) {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = bonusToISODate(today);
+    const startWeather = bonusAddDays(today, -90);
+    const endWeather = bonusAddDays(today, 7);
+
+    const [soil, weather] = await Promise.all([
+      bonusFetchSoilProperties(lat, lon),
+      bonusFetchWeatherData(lat, lon, bonusToISODate(startWeather), bonusToISODate(endWeather))
+    ]);
+
+    state.realSoil = soil;
+    state.realWeather = weather;
+
+    if (weather && Array.isArray(weather.rows) && weather.rows.length > 0) {
+      const todayRow = weather.rows.find(r => r.date === todayStr) || weather.rows[weather.rows.length - 1];
+      if (todayRow && typeof todayRow.satellite_soil_moisture === 'number' && !isNaN(todayRow.satellite_soil_moisture)) {
+        const smPct = todayRow.satellite_soil_moisture <= 1.0
+          ? Number((todayRow.satellite_soil_moisture * 100).toFixed(1))
+          : Number(todayRow.satellite_soil_moisture.toFixed(1));
+        state.realSmapMoisture = Math.max(5.0, Math.min(48.0, smPct));
+        if (state.realHistory && state.realHistory['2026']) {
+          state.realHistory['2026'].smap = state.realSmapMoisture;
+        }
+      }
+    }
+
+    updateDiagnosticUI();
+    runSimulation();
+    if (typeof runAgroShieldBonus === 'function') {
+      runAgroShieldBonus();
+    }
+  } catch (_) {}
+}
+
 
 async function bonusFetchSoilProperties(lat, lon) {
   const cacheKey = `agroshield_soil_${lat.toFixed(4)}_${lon.toFixed(4)}`;

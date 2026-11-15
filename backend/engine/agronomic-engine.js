@@ -53,11 +53,79 @@ function computeUreaSavingsBrl(nFixedKgHa) {
 
 function computeAgroShieldDecision(p, eff, currentState, stressRainPct = 0, stressTempDelta = 0) {
   const zarc = classifySoilZarc(p.soil);
-  const dap = Number(p.dap ?? 20);
+  const dap = Math.max(10, Math.min(140, Number(p.dap ?? 20)));
+  const { kc: kc0, zCm: z0 } = obterParametrosCulturaAgroShield(p.crop, dap);
+
+  // Se os dados reais do Open-Meteo + SoilGrids já estiverem carregados, usa o balanço hídrico real
+  if (currentState?.realWeather?.rows?.length > 0 && typeof bonusToISODate === 'function') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = bonusToISODate(today);
+    const plantingDate = bonusAddDays(today, -dap);
+
+    const soil = currentState.realSoil || { clay: 28.0, sand: 42.0, wv0033: 0.30, wv1500: 0.19 };
+    const tipoSoloReal = bonusClassifySoil(soil.clay, soil.sand);
+    const vwc33 = soil.wv0033 > 1.0 ? soil.wv0033 / 100.0 : soil.wv0033;
+    const vwc1500 = soil.wv1500 > 1.0 ? soil.wv1500 / 100.0 : soil.wv1500;
+    const adReal = bonusCalculateAD(vwc33, vwc1500, tipoSoloReal);
+    // Combina o AD real medido pelo SoilGrids com eventual ajuste de textura escolhido pelo usuário
+    const ad = Number(((adReal * 0.7) + (zarc.ad * 0.3)).toFixed(3));
+
+    const tempFactor = stressTempDelta > 0 ? (1 + stressTempDelta * 0.04) : 1.0;
+    const rainFactor = Math.max(0, 1 + (stressRainPct / 100));
+
+    const adjustedRows = currentState.realWeather.rows.map(r => ({
+      ...r,
+      precipitation_sum: (r.precipitation_sum || 0) * rainFactor,
+      et0_fao_evapotranspiration: (r.et0_fao_evapotranspiration || 0) * tempFactor
+    }));
+
+    const simResults = bonusRunWaterBalanceSimulation(adjustedRows, ad, plantingDate, vwc33, vwc1500, p.crop);
+    if (simResults.length > 0) {
+      const todayRes = simResults.find(r => r.date === todayStr) || simResults[simResults.length - 1];
+      let armAtual = todayRes.arm_mm;
+      const cadAtual = todayRes.cad_diaria_mm;
+      if (p.irrigation === 'irrigado') armAtual = Math.max(armAtual, 0.78 * cadAtual);
+
+      const statusAtual = armAtual <= 0.5 * cadAtual ? 'Seco' : 'Úmido';
+      let alertaIrrigacao = false, diasAteSeca = 7;
+
+      for (let i = 0; i < simResults.length; i++) {
+        const res = simResults[i];
+        if (res.date > todayStr && !alertaIrrigacao && res.arm_mm <= 0.5 * res.cad_diaria_mm) {
+          const chuvaPrev = res.chuva_mm;
+          const chuvaAnt = i > 0 ? simResults[i - 1].chuva_mm : 0;
+          if (!(chuvaPrev > 10 || chuvaAnt > 10)) {
+            alertaIrrigacao = true;
+            diasAteSeca = Math.max(1, bonusDiffDays(bonusParseISODate(res.date), today));
+          }
+        }
+      }
+
+      const pctCad = Math.round((armAtual / Math.max(1, cadAtual)) * 100);
+      let mensagemStatus = 'Terra com boa umidade para os próximos dias (Open-Meteo + SoilGrids)';
+      if (statusAtual === 'Seco') {
+        mensagemStatus = p.irrigation === 'irrigado'
+          ? 'Terra seca hoje: hora de ligar a irrigação para não perder produção'
+          : 'Terra com pouca água hoje: cubra o solo com palhada antes de plantar';
+      } else if (alertaIrrigacao) {
+        mensagemStatus = p.irrigation === 'irrigado'
+          ? `Atenção: programar irrigação em até ${diasAteSeca} dias`
+          : `Atenção: umidade segura por cerca de ${diasAteSeca} dias sem chuva`;
+      }
+
+      return {
+        zarcCode: zarc.zarcCode, ad, dap, kc: kc0, zCm: Math.round(z0),
+        cadMm: Math.round(cadAtual * 10) / 10, armMm: Math.round(armAtual * 10) / 10,
+        pctCad, status: statusAtual, alertaIrrigacao, diasAteSeca, mensagemStatus
+      };
+    }
+  }
+
+  // Fallback determinístico caso a API ainda esteja carregando ou offline
   const baseEto = Math.max(1.8, 0.0135 * (currentState.nasaTemp + stressTempDelta + 17.78) * (currentState.nasaSolar / 2.45));
   const dailyRainAvg = Math.max(0.2, (currentState.nasaRain / 365) * (1 + stressRainPct / 100));
 
-  const { kc: kc0, zCm: z0 } = obterParametrosCulturaAgroShield(p.crop, dap);
   const cad0 = zarc.ad * z0 * 10.0;
   const smapSatFraction = Math.max(0.18, Math.min(0.95, (eff.smapMoisture - 8) / 28));
   let arm = Math.max(0, Math.min(cad0, smapSatFraction * cad0));

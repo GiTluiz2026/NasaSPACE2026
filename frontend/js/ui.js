@@ -322,21 +322,34 @@ function updateCoordinatesAndFetchOrbital(lat, lon, polygonLatLngs, label, isCus
 
 function getEffectiveOrbitalMetrics() {
   const preset = PRESETS[state.regionKey];
-  const yrData = preset.history[state.selectedYear] || preset.history[2026];
+  const yrKey = String(state.selectedYear || 2026);
+  const realYrData = state.realHistory?.[yrKey];
+  const yrData = realYrData || preset.history[state.selectedYear] || preset.history[2026];
   const et0 = computeEt0HargreavesSamani(state.nasaTemp, state.nasaSolar);
   const waterBalance = computeWaterBalance(state.nasaRain, et0);
+  const normalizedBh = Math.max(-1.0, Math.min(1.0, waterBalance / 1200));
 
-  if (!state.isCustomLocation) {
-    return { smapMoisture: yrData.smap, smapDelta: preset.smapDelta, bareSoilDays: yrData.bare, et0, waterBalance };
-  }
   const soilType = document.getElementById('input-soil')?.value || 'argiloso';
   const textureBonus = soilType === 'argiloso' ? 3.2 : (soilType === 'franco' ? 1.2 : -2.5);
-  const normalizedBh = Math.max(-1.0, Math.min(1.0, waterBalance / 1200));
   const dynamicSmap = Number(Math.max(6.5, Math.min(34.0, 20.5 + normalizedBh * 9.5 + textureBonus)).toFixed(1));
+
+  // Se temos a umidade superficial real lida hoje pelo Open-Meteo (0-7cm), prioriza o dado real no ano atual (2026)
+  const smapMoisture = (Number(state.selectedYear) === 2026 && typeof state.realSmapMoisture === 'number')
+    ? state.realSmapMoisture
+    : (realYrData?.smap ?? (!state.isCustomLocation ? yrData.smap : dynamicSmap));
+
+  const bareSoilDays = realYrData?.bare ?? (!state.isCustomLocation && !state.stacLive
+    ? yrData.bare
+    : Math.round(Math.max(15, Math.min(220, 95 - (state.ndviCurrent * 85) - normalizedBh * 30))));
+
+  const smapDelta = (typeof state.realSmapMoisture === 'number' || state.nasaLive)
+    ? Math.round(normalizedBh * 22)
+    : preset.smapDelta;
+
   return {
-    smapMoisture: dynamicSmap,
-    smapDelta: Math.round(normalizedBh * 22),
-    bareSoilDays: Math.round(Math.max(15, Math.min(220, 95 - (state.ndviCurrent * 85) - normalizedBh * 30))),
+    smapMoisture,
+    smapDelta,
+    bareSoilDays,
     et0,
     waterBalance
   };
@@ -929,8 +942,8 @@ function updateHistoricalChart() {
     data: {
       labels: years,
       datasets: [
-        { type: 'line', label: 'Umidade SMAP (%)', data: years.map(y => preset.history[y].smap), borderColor: '#059669' },
-        { type: 'bar', label: 'Dias Solo Nu', data: years.map(y => preset.history[y].bare), backgroundColor: 'rgba(245,158,11,0.6)' }
+        { type: 'line', label: 'Umidade SMAP (%)', data: years.map(y => (state.realHistory?.[y]?.smap ?? preset.history[y].smap)), borderColor: '#059669' },
+        { type: 'bar', label: 'Dias Solo Nu', data: years.map(y => (state.realHistory?.[y]?.bare ?? preset.history[y].bare)), backgroundColor: 'rgba(245,158,11,0.6)' }
       ]
     },
     options: { responsive: true, maintainAspectRatio: false }
@@ -1522,12 +1535,13 @@ async function refreshMarketQuotes() {
 
 function applyMarketPriceToFutures(cropKey, priceBrl) {
   if (!priceBrl || priceBrl <= 0) return;
-  const p = getSelectedScenarioParams();
+  const p = getFarmProfile();
   if (p.crop !== cropKey) {
-    const cropSel = document.getElementById('sel-crop');
+    const cropSel = document.getElementById('input-crop');
     if (cropSel) {
       cropSel.value = cropKey;
       syncVisualButtonsFromSelects();
+      syncFuturesDefaultsForCrop(cropKey, true);
       updateDiagnosticUI();
       runSimulation();
     }
@@ -1536,13 +1550,12 @@ function applyMarketPriceToFutures(cropKey, priceBrl) {
   if (priceEl) {
     priceEl.value = Math.round(priceBrl);
     onFuturesInputChange();
-    const card = document.getElementById('loss-and-futures-card');
-    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    showToast(`Cotação da Bolsa (R$ ${Math.round(priceBrl)}) aplicada no simulador!`, 'emerald');
   }
 }
 
 function pullActiveCropPriceFromMarket() {
-  const p = getSelectedScenarioParams();
+  const p = getFarmProfile();
   const commodities = currentMarketData?.commodities || [];
   const match = commodities.find(c => c.cropKey === p.crop);
   if (match && match.priceBrl) {
@@ -1553,6 +1566,7 @@ function pullActiveCropPriceFromMarket() {
     if (priceEl) {
       priceEl.value = cfg.price;
       onFuturesInputChange();
+      showToast(`Cotação de referência (R$ ${cfg.price}) aplicada para ${cfg.name}!`, 'emerald');
     }
   }
 }

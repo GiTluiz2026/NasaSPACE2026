@@ -19,11 +19,12 @@ const MARKET_FALLBACK = {
     USD: { code: 'USD/BRL', name: 'Dólar Comercial', bid: 5.78, pctChange: 0.42 },
     EUR: { code: 'EUR/BRL', name: 'Euro Comercial', bid: 6.14, pctChange: -0.18 }
   },
-  // Benchmarks internacionais (CBOT / ICE) + fator de conversão para R$/unidade local
+  // Benchmarks internacionais (CBOT / ICE) + fator de conversão dinâmico para R$/unidade local
   commodities: [
     {
       id: 'soja',
       cropKey: 'soja',
+      yahooSymbol: 'ZS=F',
       name: 'Soja em Grão',
       exchange: 'CBOT (ZS=F) / Paranaguá',
       unit: 'sc (60kg)',
@@ -31,11 +32,12 @@ const MARKET_FALLBACK = {
       intlUnit: '¢/bu',
       pctChange: 0.85,
       // 1 saca 60kg = 2.20462 bushels; basis/prêmio porto + frete interno ajustado
-      calcBrl: (usd) => Math.round((10.185 * 2.20462 * usd) * 0.985)
+      calcBrl: (usd, quote = 1018.50) => Math.round(((quote / 100) * 2.20462 * usd) * 0.985)
     },
     {
       id: 'milho',
       cropKey: 'milho',
+      yahooSymbol: 'ZC=F',
       name: 'Milho Futuro',
       exchange: 'B3 (CCM) / CBOT (ZC=F)',
       unit: 'sc (60kg)',
@@ -43,11 +45,12 @@ const MARKET_FALLBACK = {
       intlUnit: '¢/bu',
       pctChange: -0.34,
       // 1 saca 60kg = 2.3621 bushels + prêmio interno Brasil
-      calcBrl: (usd) => Math.round((4.3125 * 2.3621 * usd) * 1.02)
+      calcBrl: (usd, quote = 431.25) => Math.round(((quote / 100) * 2.3621 * usd) * 1.02)
     },
     {
       id: 'algodao',
       cropKey: 'algodao',
+      yahooSymbol: 'CT=F',
       name: 'Algodão em Pluma',
       exchange: 'ICE (CT=F) / MT',
       unit: '@ (15kg)',
@@ -55,29 +58,31 @@ const MARKET_FALLBACK = {
       intlUnit: '¢/lb',
       pctChange: 1.12,
       // 1 arroba (15kg) = 33.0693 lb
-      calcBrl: (usd) => Math.round((0.7140 * 33.0693 * usd) * 1.01)
+      calcBrl: (usd, quote = 71.40) => Math.round(((quote / 100) * 33.0693 * usd) * 1.01)
     },
     {
       id: 'trigo',
       cropKey: 'trigo',
+      yahooSymbol: 'ZW=F',
       name: 'Trigo Moagem',
       exchange: 'CBOT (ZW=F) / PR',
       unit: 'sc (60kg)',
       intlQuote: 562.00,
       intlUnit: '¢/bu',
       pctChange: 0.25,
-      calcBrl: (usd) => Math.round((5.62 * 2.20462 * usd) * 1.06)
+      calcBrl: (usd, quote = 562.00) => Math.round(((quote / 100) * 2.20462 * usd) * 1.06)
     },
     {
       id: 'boi',
       cropKey: null,
+      yahooSymbol: 'LE=F',
       name: 'Boi Gordo Futuro',
       exchange: 'B3 (BGI)',
       unit: '@ (15kg)',
       intlQuote: 318.50,
       intlUnit: 'R$/@',
       pctChange: 0.64,
-      calcBrl: () => 318.50
+      calcBrl: (_usd, quote = 318.50) => Number(quote.toFixed(2))
     }
   ],
   stocks: [
@@ -131,35 +136,85 @@ function saveCustomTickersToStorage(tickers) {
 }
 
 async function fetchLiveExchangeRates() {
-  const res = await fetchWithTimeout('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL', 5000);
-  if (!res.ok) throw new Error(`AwesomeAPI HTTP ${res.status}`);
-  const data = await res.json();
-  const usd = data.USDBRL ? {
-    code: 'USD/BRL',
-    name: 'Dólar Comercial',
-    bid: Number(parseFloat(data.USDBRL.bid).toFixed(2)),
-    pctChange: Number(parseFloat(data.USDBRL.pctChange).toFixed(2))
-  } : MARKET_FALLBACK.fx.USD;
+  try {
+    const res = await fetchWithTimeout('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL', 5000);
+    if (!res.ok) throw new Error(`AwesomeAPI HTTP ${res.status}`);
+    const data = await res.json();
+    const usd = data.USDBRL ? {
+      code: 'USD/BRL',
+      name: 'Dólar Comercial',
+      bid: Number(parseFloat(data.USDBRL.bid).toFixed(2)),
+      pctChange: Number(parseFloat(data.USDBRL.pctChange).toFixed(2))
+    } : MARKET_FALLBACK.fx.USD;
 
-  const eur = data.EURBRL ? {
-    code: 'EUR/BRL',
-    name: 'Euro Comercial',
-    bid: Number(parseFloat(data.EURBRL.bid).toFixed(2)),
-    pctChange: Number(parseFloat(data.EURBRL.pctChange).toFixed(2))
-  } : MARKET_FALLBACK.fx.EUR;
+    const eur = data.EURBRL ? {
+      code: 'EUR/BRL',
+      name: 'Euro Comercial',
+      bid: Number(parseFloat(data.EURBRL.bid).toFixed(2)),
+      pctChange: Number(parseFloat(data.EURBRL.pctChange).toFixed(2))
+    } : MARKET_FALLBACK.fx.EUR;
 
-  return { USD: usd, EUR: eur };
+    return { USD: usd, EUR: eur };
+  } catch (e) {
+    // Fallback oficial: API aberta de Câmbio (open.er-api.com)
+    const res2 = await fetchWithTimeout('https://open.er-api.com/v6/latest/USD', 5000);
+    if (!res2.ok) throw e;
+    const d2 = await res2.json();
+    const brl = Number(d2?.rates?.BRL);
+    const eurRate = Number(d2?.rates?.EUR);
+    if (!brl || isNaN(brl)) throw e;
+    return {
+      USD: { code: 'USD/BRL', name: 'Dólar Comercial', bid: Number(brl.toFixed(2)), pctChange: 0.0 },
+      EUR: { code: 'EUR/BRL', name: 'Euro Comercial', bid: Number((eurRate ? brl / eurRate : brl * 1.07).toFixed(2)), pctChange: 0.0 }
+    };
+  }
+}
+
+async function fetchYahooChartQuote(yahooSymbol) {
+  const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1d&range=5d`;
+  const endpoints = [
+    target,
+    `https://corsproxy.io/?${encodeURIComponent(target)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`
+  ];
+  for (const url of endpoints) {
+    try {
+      const res = await fetchWithTimeout(url, 4200);
+      if (!res.ok) continue;
+      const json = await res.json();
+      const meta = json?.chart?.result?.[0]?.meta;
+      if (meta && typeof meta.regularMarketPrice === 'number') {
+        const price = meta.regularMarketPrice;
+        const prev = meta.chartPreviousClose || meta.previousClose || price;
+        const changePct = prev > 0 ? Number((((price - prev) / prev) * 100).toFixed(2)) : 0;
+        return { price, changePct, shortName: meta.shortName || yahooSymbol };
+      }
+    } catch (_) {}
+  }
+  return null;
 }
 
 async function fetchBrapiQuotes(tickers, token) {
   const list = Array.from(new Set(tickers.map(t => t.trim().toUpperCase()).filter(Boolean)));
   if (list.length === 0) return [];
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-  const url = `https://brapi.dev/api/quote/${encodeURIComponent(list.join(','))}${tokenParam}`;
-  const res = await fetchWithTimeout(url, 6000);
-  if (!res.ok) throw new Error(`Brapi HTTP ${res.status}`);
-  const data = await res.json();
-  return Array.isArray(data.results) ? data.results : [];
+  if (token) {
+    const url = `https://brapi.dev/api/quote/${encodeURIComponent(list.join(','))}?token=${encodeURIComponent(token)}`;
+    const res = await fetchWithTimeout(url, 6000);
+    if (!res.ok) throw new Error(`Brapi HTTP ${res.status}`);
+    const data = await res.json();
+    return Array.isArray(data.results) ? data.results : [];
+  }
+  // Sem token, a Brapi aceita 1 ativo público por requisição
+  const freeAllowed = list.filter(t => ['PETR4', 'VALE3', 'ITUB4', 'MGLU3'].includes(t));
+  const settled = await Promise.allSettled(
+    freeAllowed.map(async sym => {
+      const res = await fetchWithTimeout(`https://brapi.dev/api/quote/${encodeURIComponent(sym)}`, 4500);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.results?.[0] || null;
+    })
+  );
+  return settled.map(s => (s.status === 'fulfilled' ? s.value : null)).filter(Boolean);
 }
 
 async function fetchLiveMarketData(customTickers = []) {
@@ -177,12 +232,29 @@ async function fetchLiveMarketData(customTickers = []) {
   }
 
   const usdRate = fx.USD.bid || 5.78;
-  const commodities = MARKET_FALLBACK.commodities.map(c => ({
-    ...c,
-    priceBrl: c.calcBrl(usdRate)
-  }));
 
-  // Copia fallback de ações e inclui customTickers que ainda não estejam na lista
+  // Busca cotações internacionais de Commodities (CBOT/ICE) em paralelo
+  const commodities = await Promise.all(
+    MARKET_FALLBACK.commodities.map(async c => {
+      let quote = c.intlQuote;
+      let pctChange = c.pctChange;
+      if (c.yahooSymbol && c.id !== 'boi') {
+        const yData = await fetchYahooChartQuote(c.yahooSymbol);
+        if (yData && yData.price > 0) {
+          quote = Number(yData.price.toFixed(2));
+          pctChange = yData.changePct;
+        }
+      }
+      return {
+        ...c,
+        intlQuote: quote,
+        pctChange,
+        priceBrl: c.calcBrl(usdRate, quote)
+      };
+    })
+  );
+
+  // Inicializa mapa de ações B3
   const stockMap = new Map();
   MARKET_FALLBACK.stocks.forEach(s => stockMap.set(s.symbol, { ...s, isLive: false }));
   customTickers.forEach(sym => {
@@ -221,30 +293,37 @@ async function fetchLiveMarketData(customTickers = []) {
         changePct: typeof r.regularMarketChangePercent === 'number' ? Number(r.regularMarketChangePercent.toFixed(2)) : existing.changePct,
         isLive: typeof r.regularMarketPrice === 'number'
       });
+      if (typeof r.regularMarketPrice === 'number') isLiveB3 = true;
     });
-    if (results.length > 0) isLiveB3 = true;
   } catch (err) {
-    console.warn('Brapi full list fallback:', err.message);
-    if (!token) {
-      b3AuthNeeded = true;
-      // Tenta ao menos os papéis públicos gratuitos da Brapi sem token
-      try {
-        const freeResults = await fetchBrapiQuotes(['PETR4', 'VALE3', 'ITUB4', 'MGLU3'], '');
-        freeResults.forEach(r => {
-          if (r && r.symbol && stockMap.has(r.symbol)) {
-            const ex = stockMap.get(r.symbol);
-            stockMap.set(r.symbol, {
+    console.warn('Brapi fallback:', err.message);
+  }
+
+  // Para qualquer papel B3 (ex: ^BVSP, SLCE3, AGRO3, SMTO3, RAIZ4, KEPL3) ainda não atualizado via Brapi, busca no Yahoo Finance (.SA)
+  const missingSymbols = Array.from(stockMap.values()).filter(s => !s.isLive).map(s => s.symbol);
+  if (missingSymbols.length > 0) {
+    await Promise.allSettled(
+      missingSymbols.map(async sym => {
+        const ySym = sym.startsWith('^') || sym.includes('.') ? sym : `${sym}.SA`;
+        const yQuote = await fetchYahooChartQuote(ySym);
+        if (yQuote && typeof yQuote.price === 'number') {
+          const ex = stockMap.get(sym);
+          if (ex) {
+            stockMap.set(sym, {
               ...ex,
-              price: typeof r.regularMarketPrice === 'number' ? r.regularMarketPrice : ex.price,
-              changePct: typeof r.regularMarketChangePercent === 'number' ? Number(r.regularMarketChangePercent.toFixed(2)) : ex.changePct,
+              shortName: ex.shortName === sym && yQuote.shortName ? yQuote.shortName : ex.shortName,
+              price: Number(yQuote.price.toFixed(2)),
+              changePct: yQuote.changePct,
               isLive: true
             });
             isLiveB3 = true;
           }
-        });
-      } catch (_) {}
-    }
+        }
+      })
+    );
   }
+
+  if (!token && !isLiveB3) b3AuthNeeded = true;
 
   return {
     updatedAt: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
@@ -256,3 +335,4 @@ async function fetchLiveMarketData(customTickers = []) {
     stocks: Array.from(stockMap.values())
   };
 }
+
