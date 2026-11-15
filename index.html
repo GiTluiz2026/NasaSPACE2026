@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgroCycle AI — Planejador Simples de Safra</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Frontend Custom Styles -->
+  <link rel="stylesheet" href="frontend/css/styles.css">
+</head>
+<body class="antialiased selection:bg-emerald-600 selection:text-white">
+
+  <!-- Toast / Notification Container -->
+  <div id="toast-box" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- ===================================================================== -->
+  <!-- HEADER LIMPO E ACESSÍVEL                                              -->
+  <!-- ===================================================================== -->
+  <header class="bg-emerald-950 text-white sticky top-0 z-40 shadow-md">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-3">
+      <div class="flex items-center justify-between gap-3">
+        <!-- Brand -->
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow">
+            <i data-lucide="sprout" class="w-6 h-6 text-white"></i>
+          </div>
+          <div>
+            <h1 class="text-lg sm:text-xl font-extrabold tracking-tight text-white leading-none">
+              AgroCycle <span class="text-emerald-400">AI</span>
+            </h1>
+            <p id="header-subtitle" class="text-xs text-emerald-200/90 mt-1">
+              Ajuda simples para planejar sua roça e evitar perdas
+            </p>
+          </div>
+        </div>
+
+        <!-- Discrete Mode Switcher -->
+        <div class="flex items-center gap-2">
+          <div class="inline-flex p-1 rounded-xl bg-emerald-900/90 border border-emerald-800">
+            <button id="btn-mode-produtor" onclick="setExperienceMode('produtor')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer bg-emerald-500 text-slate-950 shadow-sm">
+              👨🌾 Produtor
+            </button>
+            <button id="btn-mode-tecnico" onclick="setExperienceMode('tecnico')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer text-emerald-100 hover:text-white">
+              🛰️ Técnico
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Technical Telemetry Bar (Hidden in Produtor Mode) -->
+      <div id="telemetry-bar" class="hidden mt-3 pt-2.5 border-t border-emerald-900 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="status-nasa-power" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 text-amber-300 border border-slate-700">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> NASA POWER: Conectando...
+          </span>
+          <span id="status-stac" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 text-amber-300 border border-slate-700">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> STAC Sentinel-2: Consultando...
+          </span>
+          <span id="status-backend" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 text-slate-300 border border-slate-700">
+            <span class="w-2 h-2 rounded-full bg-slate-400"></span> Motor: Offline-First
+          </span>
+          <button onclick="openScienceModal()" class="text-emerald-300 hover:underline font-semibold ml-1 cursor-pointer">
+            Ver Fórmulas & Fontes
+          </button>
+        </div>
+        <div id="coords-display" class="text-emerald-200/70 font-mono text-[11px]">
+          Lat: -24.0458° | Lon: -52.3831°
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 py-5 sm:py-7 space-y-6">
+
+    <!-- ===================================================================== -->
+    <!-- BARRA DE PROGRESSO GUIADA (3 PASSOS CLAROS - MODO PRODUTOR)            -->
+    <!-- ===================================================================== -->
+    <nav id="wizard-nav" aria-label="Etapas do planejamento" class="grid grid-cols-3 gap-2 sm:gap-3">
+      <button type="button" onclick="goToWizardStep(1)" id="wiz-btn-1" class="flex flex-col sm:flex-row items-center sm:items-center gap-1.5 sm:gap-3 p-3 rounded-2xl border-2 border-emerald-600 bg-white shadow-sm text-center sm:text-left transition cursor-pointer">
+        <span class="w-7 h-7 rounded-full bg-emerald-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0">1</span>
+        <div class="min-w-0">
+          <div class="text-xs sm:text-sm font-extrabold text-slate-900 leading-tight">Sua Terra</div>
+          <div class="hidden sm:block text-[11px] text-slate-500">Onde fica a roça</div>
+        </div>
+      </button>
+
+      <button type="button" onclick="goToWizardStep(2)" id="wiz-btn-2" class="flex flex-col sm:flex-row items-center sm:items-center gap-1.5 sm:gap-3 p-3 rounded-2xl border border-slate-200 bg-white/80 hover:border-emerald-400 text-center sm:text-left transition cursor-pointer">
+        <span class="w-7 h-7 rounded-full bg-slate-200 text-slate-700 text-xs font-extrabold flex items-center justify-center shrink-0">2</span>
+        <div class="min-w-0">
+          <div class="text-xs sm:text-sm font-extrabold text-slate-900 leading-tight">Sua Lavoura</div>
+          <div class="hidden sm:block text-[11px] text-slate-500">O que vai plantar</div>
+        </div>
+      </button>
+
+      <button type="button" onclick="goToWizardStep(3)" id="wiz-btn-3" class="flex flex-col sm:flex-row items-center sm:items-center gap-1.5 sm:gap-3 p-3 rounded-2xl border border-slate-200 bg-white/80 hover:border-emerald-400 text-center sm:text-left transition cursor-pointer">
+        <span class="w-7 h-7 rounded-full bg-slate-200 text-slate-700 text-xs font-extrabold flex items-center justify-center shrink-0">3</span>
+        <div class="min-w-0">
+          <div class="text-xs sm:text-sm font-extrabold text-slate-900 leading-tight">Seu Plano</div>
+          <div class="hidden sm:block text-[11px] text-slate-500">O que fazer agora</div>
+        </div>
+      </button>
+    </nav>
+
+    <!-- ===================================================================== -->
+    <!-- PASSO 1: ONDE FICA SUA ROÇA E COMO ESTÁ A TERRA                       -->
+    <!-- ===================================================================== -->
+    <section id="etapa-1" class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <span id="e1-eyebrow" class="text-xs font-extrabold uppercase tracking-wider text-emerald-700">Passo 1 de 3</span>
+          <h2 id="e1-title" class="text-xl sm:text-2xl font-extrabold text-slate-900 mt-0.5">Onde fica sua propriedade?</h2>
+          <p id="e1-desc" class="text-xs sm:text-sm text-slate-600 mt-1">Use o GPS do celular, escolha uma região ou toque direto no mapa.</p>
+        </div>
+
+        <!-- Unit Converter (Hectares vs Alqueires) -->
+        <div class="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 self-start sm:self-center">
+          <span class="text-[11px] font-bold text-slate-600 pl-2">Medida:</span>
+          <select id="area-unit-select" onchange="updateAreaDisplay()" class="bg-white text-slate-900 text-xs font-bold rounded-lg px-2.5 py-1.5 border border-slate-200 focus:outline-none cursor-pointer">
+            <option value="ha" selected>Hectares (ha)</option>
+            <option value="alq_sp">Alqueire Paulista (2,42 ha)</option>
+            <option value="alq_mg">Alqueire Mineiro (4,84 ha)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="p-5 sm:p-6 space-y-5">
+        <!-- Big Friendly Location Actions -->
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+          <button type="button" onclick="useDeviceGPS()" class="sm:col-span-5 flex items-center justify-center gap-2.5 py-3.5 px-4 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-sm shadow-sm transition cursor-pointer">
+            <i data-lucide="locate-fixed" class="w-5 h-5"></i>
+            <span>Usar minha localização (GPS)</span>
+          </button>
+
+          <div class="sm:col-span-7 flex items-center gap-2 bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2">
+            <i data-lucide="map-pin" class="w-5 h-5 text-emerald-600 shrink-0"></i>
+            <div class="w-full">
+              <label for="region-select" class="block text-[10px] font-bold uppercase text-slate-500">Ou escolha uma região de exemplo:</label>
+              <select id="region-select" onchange="selectPresetRegion(this.value)" class="w-full bg-transparent text-slate-900 text-sm font-bold focus:outline-none cursor-pointer">
+                <option value="campo_mourao" selected>Campo Mourão - PR (Sul • Terra Roxa)</option>
+                <option value="sorriso">Sorriso - MT (Centro-Oeste • Cerrado)</option>
+                <option value="rio_verde">Rio Verde - GO (Sudoeste Goiano)</option>
+                <option value="petrolina">Petrolina - PE (Semiárido)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Map + Health Summary Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <!-- Map Column (7 cols) -->
+          <div class="lg:col-span-7 space-y-2.5">
+            <div class="relative">
+              <div id="map" class="border border-slate-300 shadow-inner"></div>
+              <!-- Floating Area Pill -->
+              <div class="absolute bottom-3 left-3 z-20 bg-slate-900/90 backdrop-blur text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow flex items-center gap-2">
+                <span>📐 Tamanho marcado:</span>
+                <span id="polygon-area" class="text-emerald-400">84,5 ha</span>
+              </div>
+            </div>
+
+            <!-- Collapsible Advanced Map Tools -->
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <span class="text-xs text-slate-500">💡 Dica: toque em qualquer ponto do mapa para mudar o local.</span>
+              <button type="button" onclick="toggleAdvancedMapTools()" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer">
+                ✏️ Desenhar contorno exato da roça
+              </button>
+            </div>
+
+            <div id="advanced-map-tools" class="hidden p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+              <div class="flex flex-wrap items-center gap-2">
+                <button id="btn-draw-poly" onclick="toggleDrawMode()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition cursor-pointer">
+                  <i data-lucide="pen-tool" class="w-3.5 h-3.5"></i> Marcar cantos da terra
+                </button>
+                <button id="btn-finish-poly" onclick="finishPolygon()" class="hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition cursor-pointer">
+                  <i data-lucide="check" class="w-3.5 h-3.5"></i> Fechar desenho
+                </button>
+                <button onclick="resetPolygonToPreset()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 transition cursor-pointer">
+                  <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Voltar ao padrão
+                </button>
+              </div>
+              <div id="draw-instruction" class="hidden bg-amber-50 border border-amber-300 text-amber-900 px-3 py-2 rounded-xl text-xs flex items-center justify-between">
+                <span>Toque nos cantos do seu terreno no mapa (mínimo 3 pontos) e clique em <strong>Fechar desenho</strong>.</span>
+                <span id="vertex-count" class="font-bold ml-2">0 pontos</span>
+              </div>
+            </div>
+
+            <!-- NDVI Overlay Controls (Technical Mode Only) -->
+            <div id="ndvi-controls-bar" class="hidden flex flex-wrap items-center justify-between gap-3 bg-emerald-950/5 p-3 rounded-xl border border-emerald-200">
+              <label class="inline-flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-800">
+                <input type="checkbox" id="toggle-ndvi-layer" checked onchange="toggleNdviLayer(this.checked)" class="rounded text-emerald-600 w-4 h-4">
+                <span>Camada NDVI Satélite</span>
+              </label>
+              <span id="ndvi-layer-mode-badge" class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                Carregando...
+              </span>
+              <div class="flex items-center gap-2 text-[11px] font-semibold text-slate-700">
+                <span>Opacidade:</span>
+                <input type="range" id="ndvi-opacity" min="0.1" max="1" step="0.05" value="0.75" oninput="updateNdviOpacity(this.value)" class="w-20 h-1.5">
+                <span id="ndvi-opacity-val" class="w-8 text-right font-mono">75%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Visual Health Cards (5 cols) -->
+          <div class="lg:col-span-5 space-y-3.5">
+            <!-- Farmer Simple Gauges -->
+            <div id="farmer-visual-gauges" class="space-y-3">
+              <div class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+                O que o satélite vê na sua terra hoje:
+              </div>
+
+              <!-- Card 1: Água na terra -->
+              <div class="p-4 rounded-2xl border border-amber-200 bg-amber-50/60 space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <span class="text-2xl">💧</span>
+                    <div>
+                      <div class="text-[11px] font-bold text-slate-600 uppercase">Água guardada na terra</div>
+                      <div id="fg-water-status" class="text-base font-extrabold text-amber-900">Umidade Média</div>
+                    </div>
+                  </div>
+                  <span id="fg-water-pill" class="px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-200/80 text-amber-950">Atenção</span>
+                </div>
+                <div class="w-full h-2.5 bg-white rounded-full overflow-hidden border border-amber-200/70">
+                  <div id="fg-water-bar" class="h-full bg-amber-500 rounded-full transition-all duration-500" style="width: 60%"></div>
+                </div>
+                <p id="fg-water-tip" class="text-xs text-slate-700 leading-relaxed">
+                  A terra seca rápido se ficar sem cobertura. Palhada ajuda a segurar a chuva.
+                </p>
+              </div>
+
+              <!-- Card 2: Cobertura verde -->
+              <div class="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <span class="text-2xl">🌿</span>
+                    <div>
+                      <div class="text-[11px] font-bold text-slate-600 uppercase">Verde / Cobertura da roça</div>
+                      <div id="fg-ndvi-status" class="text-base font-extrabold text-emerald-900">Bom Verde</div>
+                    </div>
+                  </div>
+                  <span id="fg-ndvi-pill" class="px-2.5 py-1 rounded-full text-xs font-extrabold bg-emerald-200/80 text-emerald-950">Bom</span>
+                </div>
+                <div class="w-full h-2.5 bg-white rounded-full overflow-hidden border border-emerald-200/70">
+                  <div id="fg-ndvi-bar" class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: 65%"></div>
+                </div>
+                <p class="text-xs text-slate-700 leading-relaxed">
+                  No mapa: <strong>verde</strong> mostra planta forte; <strong>vermelho/amarelo</strong> mostra terra descoberta.
+                </p>
+              </div>
+
+              <!-- Card 3: Clima da região -->
+              <div class="p-4 rounded-2xl border border-sky-200 bg-sky-50/60 space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-extrabold text-slate-700 uppercase">🌦️ Clima da Região</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                  <div class="bg-white p-2.5 rounded-xl border border-sky-100 text-center">
+                    <div id="fg-temp" class="text-sm font-extrabold text-slate-900">22.8 °C</div>
+                    <div class="text-[10px] text-slate-500 mt-0.5">Calor médio</div>
+                  </div>
+                  <div class="bg-white p-2.5 rounded-xl border border-sky-100 text-center">
+                    <div id="fg-rain" class="text-sm font-extrabold text-slate-900">1.480 mm</div>
+                    <div class="text-[10px] text-slate-500 mt-0.5">Chuva/ano</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Technical Diagnostics Panel (Hidden in Produtor Mode) -->
+            <div id="tech-diagnostics-panel" class="hidden space-y-3">
+              <div class="p-3.5 rounded-xl border border-amber-200 bg-amber-50/60">
+                <div class="flex items-center justify-between">
+                  <div class="text-xs font-bold text-slate-900">Umidade Residual (NASA SMAP)</div>
+                  <button onclick="openTranslatorModal('smap')" class="text-[11px] font-semibold text-emerald-800 underline cursor-pointer">Explicar</button>
+                </div>
+                <div id="val-smap" class="text-sm font-extrabold text-amber-800 mt-1">21.4% vol • Déficit (-14%)</div>
+              </div>
+
+              <div class="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/60">
+                <div class="flex items-center justify-between">
+                  <div class="text-xs font-bold text-slate-900">Vigor NDVI (STAC Sentinel-2)</div>
+                  <button onclick="openTranslatorModal('ndvi')" class="text-[11px] font-semibold text-emerald-800 underline cursor-pointer">Explicar</button>
+                </div>
+                <div id="val-ndvi" class="text-sm font-extrabold text-emerald-800 mt-1">NDVI 0.59</div>
+                <p id="desc-ndvi" class="text-xs text-slate-600 mt-1"></p>
+              </div>
+
+              <div class="p-3.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div class="text-xs font-bold text-slate-800 mb-2">Balanço Hídrico & Radiação (FAO-56)</div>
+                <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div class="bg-white p-2 rounded-lg border border-slate-200">
+                    <div class="text-[10px] text-slate-500">ET₀</div>
+                    <div id="metric-et0" class="font-bold text-emerald-800">4.12 mm/d</div>
+                  </div>
+                  <div class="bg-white p-2 rounded-lg border border-slate-200">
+                    <div class="text-[10px] text-slate-500">Radiação</div>
+                    <div id="metric-solar" class="font-bold text-slate-900">18.4 MJ</div>
+                  </div>
+                  <div class="bg-white p-2 rounded-lg border border-slate-200">
+                    <div class="text-[10px] text-slate-500">Balanço</div>
+                    <div id="metric-bh" class="font-bold text-slate-900">-24 mm</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Next Step CTA -->
+            <div id="wiz-footer-1" class="pt-1">
+              <button type="button" onclick="goToWizardStep(2)" class="w-full py-4 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-base shadow-md transition flex items-center justify-center gap-2 cursor-pointer">
+                <span>Continuar para o Passo 2</span>
+                <i data-lucide="arrow-right" class="w-5 h-5"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Historical Chart (Technical Mode Only) -->
+        <div id="historical-player-box" class="hidden bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-bold uppercase text-slate-700">Série Histórica SMAP & Solo Nu (2021–2026)</h3>
+            <span id="selected-year-badge" class="px-2.5 py-0.5 rounded-lg bg-emerald-900 text-white text-xs font-bold">2026</span>
+          </div>
+          <input type="range" id="year-slider" min="2021" max="2026" step="1" value="2026" oninput="updateYearView(this.value)" class="w-full">
+          <div class="h-40 w-full"><canvas id="historicalChart"></canvas></div>
+          <p id="bare-soil-text" class="text-xs text-amber-900 bg-amber-50 p-2.5 rounded-xl border border-amber-200"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- PASSO 2: PERGUNTAS SIMPLES SOBRE A LAVOURA                            -->
+    <!-- ===================================================================== -->
+    <section id="etapa-2" class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="p-5 sm:p-6 border-b border-slate-100">
+        <span id="e2-eyebrow" class="text-xs font-extrabold uppercase tracking-wider text-emerald-700">Passo 2 de 3</span>
+        <h2 id="e2-title" class="text-xl sm:text-2xl font-extrabold text-slate-900 mt-0.5">Conte como é a sua lavoura</h2>
+        <p class="text-xs sm:text-sm text-slate-600 mt-1">Toque nas opções abaixo. O plano se adapta às suas máquinas e à sua terra.</p>
+      </div>
+
+      <div class="p-5 sm:p-6 space-y-6">
+        <!-- PRODUTOR SIMPLE INPUTS -->
+        <div id="farmer-visual-inputs" class="space-y-6">
+          <!-- Question 1: Cultura -->
+          <div>
+            <label class="block text-sm font-extrabold text-slate-900 mb-2.5">1. Qual é a sua plantação principal?</label>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+              <button type="button" onclick="quickSelectField('crop','soja', this)" data-val="soja" class="quick-crop-btn p-3.5 rounded-2xl border-2 border-emerald-600 bg-emerald-50 text-center transition cursor-pointer">
+                <div class="text-2xl">🌱</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Soja</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','milho', this)" data-val="milho" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">🌽</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Milho</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','feijao', this)" data-val="feijao" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">🫘</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Feijão</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','mandioca', this)" data-val="mandioca" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">🥔</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Mandioca</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','algodao', this)" data-val="algodao" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">☁️</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Algodão</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','trigo', this)" data-val="trigo" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">🌾</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Trigo</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Question 2 & 3: Solo & Água -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label class="block text-sm font-extrabold text-slate-900 mb-2">2. Como é o tipo de terra?</label>
+              <div class="grid grid-cols-3 gap-2.5">
+                <button type="button" onclick="quickSelectField('soil','argiloso', this)" class="quick-soil-btn p-3 rounded-2xl border-2 border-emerald-600 bg-emerald-50 text-center transition cursor-pointer">
+                  <div class="flex justify-center"><img src="https://cdn-icons-png.flaticon.com/512/105/105527.png" alt="Terreno" class="w-6 h-6 object-contain"></div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Terra Roxa / Barro</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Segura mais água</div>
+                </button>
+                <button type="button" onclick="quickSelectField('soil','franco', this)" class="quick-soil-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                  <div class="flex justify-center"><img src="https://cdn-icons-png.flaticon.com/512/105/105527.png" alt="Terreno" class="w-6 h-6 object-contain"></div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Terra Mista</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Equilibrada</div>
+                </button>
+                <button type="button" onclick="quickSelectField('soil','arenoso', this)" class="quick-soil-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                  <div class="flex justify-center"><img src="https://cdn-icons-png.flaticon.com/512/105/105527.png" alt="Terreno" class="w-6 h-6 object-contain"></div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Arenosa</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Seca mais rápido</div>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-sm font-extrabold text-slate-900 mb-2">3. Como a lavoura recebe água?</label>
+              <div class="grid grid-cols-2 gap-2.5">
+                <button type="button" onclick="quickSelectField('irrigation','sequeiro', this)" class="quick-irr-btn p-3 rounded-2xl border-2 border-emerald-600 bg-emerald-50 text-center transition cursor-pointer">
+                  <div class="text-xl">🌧️</div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Só Chuva (Sequeiro)</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Depende do clima</div>
+                </button>
+                <button type="button" onclick="quickSelectField('irrigation','irrigado', this)" class="quick-irr-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                  <div class="text-xl">💧</div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Tenho Irrigação</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Pivô ou gotejo</div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Question 4: Fase do Plantio -->
+          <div>
+            <label class="block text-sm font-extrabold text-slate-900 mb-2">4. Em que ponto está o plantio hoje?</label>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <button type="button" onclick="selectDapPreset(0, this)" class="quick-dap-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-lg">🌰</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-0.5">Vou plantar ainda</div>
+              </button>
+              <button type="button" onclick="selectDapPreset(20, this)" class="quick-dap-btn p-3 rounded-2xl border-2 border-emerald-600 bg-emerald-50 text-center transition cursor-pointer">
+                <div class="text-lg">🌱</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-0.5">Começando (20 dias)</div>
+              </button>
+              <button type="button" onclick="selectDapPreset(50, this)" class="quick-dap-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-lg">🌼</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-0.5">Na florada (50 dias)</div>
+              </button>
+              <button type="button" onclick="selectDapPreset(80, this)" class="quick-dap-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-lg">🌾</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-0.5">Enchendo grão (80d)</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Question 5 & 6: Maquinário + Objetivo em 2 cartões limpos -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-2.5">
+              <div class="text-sm font-extrabold text-slate-900">5. Tem caixa para semente miúda?</div>
+              <p class="text-xs text-slate-600">Ex: braquiária ou crotalária. Se não tiver, sugerimos só sementes que passam na plantadeira comum.</p>
+              <div class="grid grid-cols-2 gap-2 pt-1">
+                <button type="button" id="simple-miudas-sim" onclick="setSimpleMiudas(true)" class="py-2.5 px-3 rounded-xl text-xs font-extrabold bg-emerald-600 text-white cursor-pointer transition">
+                  ✓ Sim, tenho
+                </button>
+                <button type="button" id="simple-miudas-nao" onclick="setSimpleMiudas(false)" class="py-2.5 px-3 rounded-xl text-xs font-extrabold bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition">
+                  ✗ Não tenho
+                </button>
+              </div>
+            </div>
+
+            <div class="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-2.5">
+              <div class="text-sm font-extrabold text-slate-900">6. O que é mais importante para você agora?</div>
+              <div class="grid grid-cols-3 gap-2 pt-1">
+                <button type="button" onclick="applyFarmerGoal('caixa', this)" class="goal-btn p-2.5 rounded-xl border border-slate-200 bg-white hover:border-emerald-500 text-center cursor-pointer transition">
+                  <div class="text-base">💰</div>
+                  <div class="text-[11px] font-extrabold text-slate-900 mt-0.5">Dinheiro rápido</div>
+                </button>
+                <button type="button" onclick="applyFarmerGoal('equilibrio', this)" class="goal-btn p-2.5 rounded-xl border-2 border-emerald-600 bg-emerald-50 text-center cursor-pointer transition">
+                  <div class="text-base">⚖️</div>
+                  <div class="text-[11px] font-extrabold text-slate-900 mt-0.5">Equilíbrio</div>
+                </button>
+                <button type="button" onclick="applyFarmerGoal('solo', this)" class="goal-btn p-2.5 rounded-xl border border-slate-200 bg-white hover:border-emerald-500 text-center cursor-pointer transition">
+                  <div class="text-base">🛡️</div>
+                  <div class="text-[11px] font-extrabold text-slate-900 mt-0.5">Proteger a terra</div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TECHNICAL INPUTS (Hidden in Produtor Mode) -->
+        <div id="tech-panel-step2" class="hidden space-y-5">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Cultura Principal</label>
+              <select id="input-crop" onchange="runSimulation()" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold">
+                <option value="soja" selected>Soja</option>
+                <option value="milho">Milho</option>
+                <option value="feijao">Feijão</option>
+                <option value="mandioca">Mandioca</option>
+                <option value="algodao">Algodão</option>
+                <option value="trigo">Trigo</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Textura do Solo (ZARC)</label>
+              <select id="input-soil" onchange="runSimulation()" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold">
+                <option value="argiloso" selected>Tipo 3 - Argiloso (&gt;35%)</option>
+                <option value="franco">Tipo 2 - Médio (15–35%)</option>
+                <option value="arenoso">Tipo 1 - Arenoso (&lt;15%)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Compactação</label>
+              <select id="input-compaction" onchange="runSimulation()" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold">
+                <option value="baixo">Baixa</option>
+                <option value="medio" selected>Média</option>
+                <option value="alto">Alta</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Regime Hídrico</label>
+              <select id="input-irrigation" onchange="runSimulation()" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold">
+                <option value="sequeiro" selected>Sequeiro</option>
+                <option value="irrigado">Irrigado</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+            <div>
+              <div class="flex justify-between text-xs font-bold mb-1"><span>pH (CaCl₂)</span><span id="val-ph" class="text-emerald-700">5.6</span></div>
+              <input type="range" id="input-ph" min="4.5" max="7.2" step="0.1" value="5.6" oninput="document.getElementById('val-ph').textContent = this.value; runSimulation()" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between text-xs font-bold mb-1"><span>Matéria Orgânica</span><span id="val-mo" class="text-emerald-700">2.4%</span></div>
+              <input type="range" id="input-mo" min="0.8" max="5.5" step="0.1" value="2.4" oninput="document.getElementById('val-mo').textContent = this.value + '%'; runSimulation()" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between text-xs font-bold mb-1"><span>Dias Após Plantio (DAP)</span><span id="val-dap" class="text-emerald-700">20 dias</span></div>
+              <input type="range" id="input-dap" min="0" max="120" step="5" value="20" oninput="document.getElementById('val-dap').textContent = this.value + ' dias'; runSimulation()" class="w-full">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div class="p-3.5 rounded-xl border border-slate-200 space-y-2">
+              <div class="font-bold text-slate-800">Maquinário Disponível</div>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mach-conv" checked onchange="runSimulation()"> Plantadeira Convencional</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mach-miudas" checked onchange="runSimulation()"> Caixa Sementes Miúdas</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mach-colhedora" checked onchange="runSimulation()"> Colhedora Própria</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mach-rolofaca" onchange="runSimulation()"> Rolofaca / Triturador</label>
+            </div>
+            <div class="p-3.5 rounded-xl border border-slate-200 space-y-2">
+              <div class="font-bold text-slate-800">Mercado & Escoamento</div>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mkt-graos" checked onchange="runSimulation()"> Cooperativa / Armazém</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mkt-pecuaria" checked onchange="runSimulation()"> Pecuária / Pastejo (ILP)</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mkt-cobertura" checked onchange="runSimulation()"> Sementes de Cobertura</label>
+              <div id="constraint-feedback" class="text-[11px] text-emerald-800 bg-emerald-50 p-2 rounded-lg"></div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-emerald-950 text-white p-4 rounded-2xl text-xs">
+            <div>
+              <div class="flex justify-between font-bold mb-1"><span>Caixa vs Solo</span><span id="prio-balance-label">40% / 60%</span></div>
+              <input type="range" id="prio-soil-vs-cash" min="0" max="100" value="60" oninput="updatePriorityLabels(); runSimulation()" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between font-bold mb-1"><span>Peso Água</span><span id="prio-water-val">75%</span></div>
+              <input type="range" id="prio-water" min="0" max="100" value="75" oninput="updatePriorityLabels(); runSimulation()" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between font-bold mb-1"><span>Peso Pragas</span><span id="prio-pest-val">70%</span></div>
+              <input type="range" id="prio-pest" min="0" max="100" value="70" oninput="updatePriorityLabels(); runSimulation()" class="w-full">
+            </div>
+          </div>
+        </div>
+
+        <!-- Wizard Step 2 Navigation Buttons -->
+        <div id="wiz-footer-2" class="flex flex-col sm:flex-row gap-3 pt-2">
+          <button type="button" onclick="goToWizardStep(1)" class="sm:w-1/3 py-3.5 px-4 rounded-2xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 font-bold text-sm transition flex items-center justify-center gap-2 cursor-pointer">
+            <i data-lucide="arrow-left" class="w-4 h-4"></i> Voltar ao Mapa
+          </button>
+          <button type="button" onclick="goToWizardStep(3)" class="sm:w-2/3 py-4 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-base shadow-md transition flex items-center justify-center gap-2 cursor-pointer">
+            <span>Ver Meu Plano Pronto</span>
+            <i data-lucide="arrow-right" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- PASSO 3: CARTÃO ÚNICO DE DECISÃO E PREVENÇÃO                          -->
+    <!-- ===================================================================== -->
+    <section id="etapa-3" class="space-y-5">
+      <!-- Unified Simple Decision Card (Produtor Mode) -->
+      <div id="farmer-decision-hub" class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+        <!-- Traffic Light Banner -->
+        <div id="semaphore-banner" class="p-5 sm:p-6 bg-emerald-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="flex items-start gap-3.5">
+            <div id="semaphore-icon" class="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-2xl shrink-0">
+              🟢
+            </div>
+            <div>
+              <div class="text-xs font-extrabold uppercase tracking-wider text-emerald-300">Passo 3 de 3 • Resumo para sua roça</div>
+              <h2 id="semaphore-title" class="text-lg sm:text-2xl font-extrabold text-white mt-0.5">Terra em boas condições para plantar</h2>
+              <p id="semaphore-subtitle" class="text-xs sm:text-sm text-emerald-100/90 mt-1">Umidade adequada e baixo risco imediato. Siga o plano abaixo para proteger sua safra.</p>
+            </div>
+          </div>
+          <div id="semaphore-area-badge" class="bg-white/10 border border-white/20 px-4 py-2.5 rounded-2xl text-right shrink-0 self-start sm:self-center">
+            <div class="text-[10px] uppercase font-bold text-emerald-200">Área calculada</div>
+            <div id="summary-area-text" class="text-base font-extrabold text-white">84,5 ha</div>
+          </div>
+        </div>
+
+        <div class="p-5 sm:p-6 space-y-6">
+          <!-- 3-Cycle Simple Roadmap -->
+          <div>
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h3 id="recommended-plan-title" class="text-base sm:text-lg font-extrabold text-slate-900">
+                🌱 O que plantar nas próximas 3 safras
+              </h3>
+              <button type="button" onclick="toggleComparePlansModal()" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer">
+                Ver outras 2 opções de plano
+              </button>
+            </div>
+
+            <div id="simple-3-cycles" class="grid grid-cols-1 md:grid-cols-3 gap-3.5"></div>
+          </div>
+
+          <!-- Financial & Fertilizer Savings Highlight -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center gap-3.5">
+              <div class="w-11 h-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xl shrink-0">💰</div>
+              <div>
+                <div class="text-xs font-bold text-emerald-900">Sobra estimada na propriedade</div>
+                <div id="simple-total-margin" class="text-xl font-extrabold text-slate-900">R$ 325.325</div>
+                <div id="simple-unit-margin" class="text-[11px] text-emerald-800 font-semibold">R$ 3.850 por hectare</div>
+              </div>
+            </div>
+
+            <div class="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center gap-3.5">
+              <div class="w-11 h-11 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center text-xl shrink-0">🌿</div>
+              <div>
+                <div class="text-xs font-bold text-amber-950">Economia estimada com adubo</div>
+                <div id="simple-urea-saved" class="text-base font-extrabold text-slate-900">R$ 391/ha em ureia</div>
+                <div class="text-[11px] text-amber-900 font-medium">A própria planta aduba a terra</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 1-Tap Weather Stress Test -->
+          <div class="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3.5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div class="text-sm font-extrabold text-slate-900">🌦️ Teste rápido: e se o clima virar?</div>
+                <p class="text-xs text-slate-600">Toque para ver como este plano segura a produção se faltar chuva ou esfriar:</p>
+              </div>
+              <div id="simple-resilience-pill" class="px-3 py-1.5 rounded-xl bg-emerald-100 text-emerald-900 text-xs font-extrabold self-start sm:self-center">
+                🛡️ Segura 91% da colheita
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button type="button" onclick="selectRiskSimulation('normal', this)" class="risk-sim-btn py-2.5 px-3 rounded-xl border-2 border-emerald-600 bg-emerald-50 text-xs font-extrabold text-slate-900 cursor-pointer transition">
+                ☀️ Ano Normal
+              </button>
+              <button type="button" onclick="selectRiskSimulation('seca', this)" class="risk-sim-btn py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:border-amber-400 text-xs font-extrabold text-slate-800 cursor-pointer transition">
+                🏜️ Se der Seca
+              </button>
+              <button type="button" onclick="selectRiskSimulation('calor', this)" class="risk-sim-btn py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:border-rose-400 text-xs font-extrabold text-slate-800 cursor-pointer transition">
+                🔥 Muito Calor
+              </button>
+              <button type="button" onclick="selectRiskSimulation('geada', this)" class="risk-sim-btn py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:border-sky-400 text-xs font-extrabold text-slate-800 cursor-pointer transition">
+                ❄️ Se der Geada
+              </button>
+            </div>
+
+            <div id="simple-prevention-tip" class="p-3 rounded-xl bg-white border border-slate-200 text-xs text-slate-700 leading-relaxed">
+              💡 <strong>Dica de proteção:</strong> Manter palhada na entressafra guarda água no solo e reduz em até 70% o risco de perda por falta de chuva.
+            </div>
+          </div>
+
+          <!-- ESTIMATIVA DE PERDAS E CALCULADORA DE VENDAS FUTURAS -->
+          <div id="loss-and-futures-card" class="p-4 sm:p-5 rounded-2xl bg-emerald-950/5 border border-emerald-200 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-extrabold text-slate-900">📊 Estimativa de Perdas e Vendas Futuras (Trava de Safra)</span>
+                  <span id="futures-crop-badge" class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-extrabold uppercase">Soja</span>
+                </div>
+                <p class="text-xs text-slate-600 mt-0.5">Simule quanto pode perder com o clima e descubra quanto da safra é seguro vender antecipado (CPR, Barter ou Contrato Futuro).</p>
+              </div>
+              <button type="button" onclick="applyRecommendedHedge()" class="self-start sm:self-center px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold transition cursor-pointer shrink-0">
+                🛡️ Aplicar Trava Segura
+              </button>
+            </div>
+
+            <!-- Adjustable Market & Yield Inputs -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-white p-3.5 rounded-2xl border border-slate-200">
+              <div>
+                <label for="fut-yield-ha" class="block text-[11px] font-bold text-slate-600">Produtividade Esperada (<span class="fut-unit-label">sc</span>/ha)</label>
+                <input type="number" id="fut-yield-ha" min="1" step="1" value="62" oninput="onFuturesInputChange()" class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-extrabold text-slate-900 focus:outline-none focus:border-emerald-600">
+                <div class="text-[10px] text-slate-500 mt-0.5">Média sem perdas</div>
+              </div>
+
+              <div>
+                <label for="fut-price" class="block text-[11px] font-bold text-slate-600">Preço Venda Futura (R$/<span class="fut-unit-label">sc</span>)</label>
+                <input type="number" id="fut-price" min="1" step="1" value="128" oninput="onFuturesInputChange()" class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-extrabold text-slate-900 focus:outline-none focus:border-emerald-600">
+                <div class="text-[10px] text-slate-500 mt-0.5">Cotação / contrato</div>
+              </div>
+
+              <div>
+                <label for="fut-cost-ha" class="block text-[11px] font-bold text-slate-600">Custo de Produção (R$/ha)</label>
+                <input type="number" id="fut-cost-ha" min="100" step="50" value="4100" oninput="onFuturesInputChange()" class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-extrabold text-slate-900 focus:outline-none focus:border-emerald-600">
+                <div class="text-[10px] text-slate-500 mt-0.5">Semente, adubo, defensivo</div>
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between">
+                  <label for="fut-hedge-pct" class="text-[11px] font-bold text-slate-600">% Venda Antecipada</label>
+                  <span id="fut-hedge-val" class="text-xs font-extrabold text-emerald-700">45%</span>
+                </div>
+                <input type="range" id="fut-hedge-pct" min="0" max="85" step="5" value="45" oninput="onFuturesHedgeSliderChange()" class="mt-2 w-full">
+                <div id="fut-safe-limit-hint" class="text-[10px] font-semibold text-emerald-800 mt-0.5">Limite seguro: até 55%</div>
+              </div>
+            </div>
+
+            <!-- 4 Result Cards: Colheita, Perda/Quebra, Venda Futura, Lucro Líquido -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <!-- Card 1: Produção Líquida Prevista -->
+              <div class="p-3.5 rounded-2xl bg-white border border-slate-200 space-y-1">
+                <div class="text-[10px] font-extrabold uppercase text-slate-500">1. Colheita Prevista (Com Clima)</div>
+                <div id="fut-net-prod" class="text-base sm:text-lg font-extrabold text-slate-900">4.767 sc</div>
+                <div id="fut-potential-prod" class="text-[11px] text-slate-500">Potencial sem perda: 5.239 sc</div>
+                <div id="fut-breakeven-text" class="text-[11px] font-bold text-emerald-800 pt-1">Paga custos com: 29,0 sc/ha</div>
+              </div>
+
+              <!-- Card 2: Estimativa de Perdas -->
+              <div class="p-3.5 rounded-2xl bg-rose-50/70 border border-rose-200 space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-extrabold uppercase text-rose-900">2. Perda Estimada (Quebra)</span>
+                  <span id="fut-loss-pct-badge" class="px-1.5 py-0.5 rounded bg-rose-200 text-rose-950 text-[10px] font-extrabold">-9%</span>
+                </div>
+                <div id="fut-loss-brl" class="text-base sm:text-lg font-extrabold text-rose-700">- R$ 60.416</div>
+                <div id="fut-loss-vol" class="text-[11px] text-rose-900 font-medium">472 sc em risco no clima atual</div>
+                <div id="fut-saved-loss-brl" class="text-[11px] font-bold text-emerald-800 pt-1">🛡️ Plano evita R$ 126.000 em perdas</div>
+              </div>
+
+              <!-- Card 3: Venda Futura (Trava) -->
+              <div class="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-200 space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-extrabold uppercase text-sky-900">3. Venda Futura (Travada)</span>
+                  <span id="fut-hedge-status-badge" class="px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-950 text-[10px] font-extrabold">Trava Segura</span>
+                </div>
+                <div id="fut-hedged-brl" class="text-base sm:text-lg font-extrabold text-slate-900">R$ 274.560</div>
+                <div id="fut-hedged-vol" class="text-[11px] text-slate-600">2.145 sc vendidas no contrato</div>
+                <div id="fut-cost-coverage" class="text-[11px] font-bold text-sky-900 pt-1">Cobre 87% do custo total</div>
+              </div>
+
+              <!-- Card 4: Saldo Livre & Resultado Final -->
+              <div class="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 space-y-1">
+                <div class="text-[10px] font-extrabold uppercase text-emerald-900">4. Lucro Líquido Projetado</div>
+                <div id="fut-net-profit-brl" class="text-base sm:text-lg font-extrabold text-emerald-900">R$ 296.810</div>
+                <div id="fut-net-profit-ha" class="text-[11px] text-emerald-800 font-semibold">R$ 3.512 / ha (c/ economia adubo)</div>
+                <div id="fut-spot-vol" class="text-[11px] text-slate-600 pt-1">Livre p/ venda futura/spot: 2.622 sc</div>
+              </div>
+            </div>
+
+            <!-- Advisory Banner -->
+            <div id="fut-advisory-box" class="p-3 rounded-xl bg-white border border-emerald-200 text-xs text-slate-700 leading-relaxed">
+              💡 <strong>Recomendação de Comercialização:</strong> Com o risco climático atual, trave até <strong>55%</strong> da produção prevista para garantir os custos de plantio sem correr risco de faltar produto para entregar.
+            </div>
+          </div>
+
+          <!-- BÔNUS ADICIONAL: PREVISÃO E ESTIMATIVA HÍDRICA DIÁRIA (AGRO SHIELD) -->
+          <div id="bonus-agroshield-card" class="p-4 sm:p-5 rounded-2xl bg-sky-50/70 border border-sky-200 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-extrabold text-slate-900">💧 Previsão e Estimativa de Água na Raiz</span>
+                  <span class="px-2 py-0.5 rounded-full bg-sky-100 text-sky-900 text-[10px] font-extrabold uppercase">Previsão 7 dias</span>
+                </div>
+                <p class="text-xs text-slate-600 mt-0.5">Simulação do histórico da safra e previsão para os próximos 7 dias usando dados de solo (SoilGrids) e meteorologia (Open-Meteo).</p>
+              </div>
+              <div class="flex items-center gap-2 self-start sm:self-center">
+                <span id="bonus-source-pill" class="px-2.5 py-1 rounded-full bg-white border border-sky-200 text-[11px] font-bold text-sky-900">Pronto</span>
+                <button type="button" onclick="runAgroShieldBonus()" class="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-extrabold transition cursor-pointer">
+                  Atualizar Previsão
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="p-3.5 rounded-2xl bg-white border border-sky-100 space-y-1">
+                <div class="text-[11px] font-bold uppercase text-slate-500">Status Estimado Hoje</div>
+                <div id="bonus-res-status" class="text-lg font-extrabold text-slate-900">-</div>
+                <div id="bonus-res-msg" class="text-xs text-slate-600">Toque em Atualizar Previsão</div>
+                <div class="flex flex-wrap gap-1.5 pt-1">
+                  <span id="bonus-res-soil" class="px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-bold text-slate-700">Solo: -</span>
+                  <span id="bonus-res-cad" class="px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-bold text-slate-700">Máx: -</span>
+                </div>
+              </div>
+
+              <div class="p-3.5 rounded-2xl bg-white border border-sky-100 space-y-2">
+                <div class="text-[11px] font-bold uppercase text-slate-500">Água Estimada na Raiz (Hoje)</div>
+                <div class="text-lg font-extrabold text-slate-900">
+                  <span id="bonus-res-arm">-</span> <span class="text-xs font-semibold text-slate-500">mm</span>
+                </div>
+                <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div id="bonus-res-arm-bar" class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+                <div id="bonus-res-pct" class="text-[11px] font-semibold text-slate-500">0% da capacidade</div>
+              </div>
+
+              <div class="p-3.5 rounded-2xl bg-white border border-sky-100 space-y-1">
+                <div class="text-[11px] font-bold uppercase text-slate-500">Previsão (Próximos 7 Dias)</div>
+                <div id="bonus-res-irr-title" class="text-lg font-extrabold text-emerald-700">-</div>
+                <div id="bonus-res-irr-sub" class="text-xs text-slate-600">Aguardando previsão</div>
+              </div>
+            </div>
+
+            <div class="bg-white p-3.5 rounded-2xl border border-sky-100">
+              <div class="text-xs font-extrabold text-slate-800 mb-2">Evolução e Previsão Diária (Chuva Prevista × Água Estimada no Solo)</div>
+              <div class="relative h-52 w-full">
+                <canvas id="bonusWaterChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Primary Action Buttons -->
+          <div class="flex flex-col sm:flex-row gap-3 pt-1">
+            <button type="button" onclick="goToWizardStep(2)" class="sm:w-1/3 py-3.5 px-4 rounded-2xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 font-bold text-sm transition flex items-center justify-center gap-2 cursor-pointer">
+              <i data-lucide="arrow-left" class="w-4 h-4"></i> Ajustar Respostas
+            </button>
+            <button type="button" onclick="openReportModal()" class="sm:w-2/3 py-4 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-base shadow-lg transition flex items-center justify-center gap-2.5 cursor-pointer">
+              <i data-lucide="share-2" class="w-5 h-5"></i>
+              <span>Enviar Plano no WhatsApp ou Salvar PDF</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- =================================================================== -->
+      <!-- VISÃO TÉCNICA COMPLETA (Oculta no Modo Produtor)                    -->
+      <!-- =================================================================== -->
+      <div id="tech-scenarios-wrapper" class="hidden space-y-5">
+        <div id="agro-shield-panel"></div>
+        <div id="scenarios-container" class="grid grid-cols-1 lg:grid-cols-3 gap-5"></div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+          <div class="lg:col-span-6">
+            <h3 class="text-sm font-bold text-slate-900 mb-2">Matriz Multi-Critério (7 Pilares)</h3>
+            <div class="relative h-72 w-full"><canvas id="radarChart"></canvas></div>
+          </div>
+          <div class="lg:col-span-6 space-y-3">
+            <h3 class="text-sm font-bold text-slate-900">Simulador de Estresse Climático (FAO-33)</h3>
+            <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
+              <div>
+                <div class="flex justify-between font-bold mb-1"><span>Variação de Chuva</span><span id="stress-rain-val">0%</span></div>
+                <input type="range" id="stress-rain" min="-30" max="15" step="5" value="0" oninput="updateClimateStress()" class="w-full">
+              </div>
+              <div>
+                <div class="flex justify-between font-bold mb-1"><span>Anomalia Térmica</span><span id="stress-temp-val">+0.0 °C</span></div>
+                <input type="range" id="stress-temp" min="0" max="3.5" step="0.5" value="0" oninput="updateClimateStress()" class="w-full">
+              </div>
+              <label class="flex items-center gap-2 font-bold">
+                <input type="checkbox" id="stress-frost" onchange="updateClimateStress()"> Simular Geada (-2°C)
+              </label>
+            </div>
+            <div id="resilience-cards" class="grid grid-cols-3 gap-2.5"></div>
+          </div>
+        </div>
+
+        <!-- Painel Técnico de Estimativa de Quebra e Hedge Comercial -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900">Matriz de Quebra de Safra (FAO-33) & Hedge de Comercialização Futura</h3>
+              <p class="text-xs text-slate-500">Comparativo financeiro de risco físico, ponto de equilíbrio (break-even) e limite seguro de trava (CPR/Barter) nos 3 cenários.</p>
+            </div>
+            <span id="tech-futures-summary-pill" class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 text-xs font-extrabold self-start sm:self-center">Trava Atual: 45%</span>
+          </div>
+          <div id="tech-futures-table" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="max-w-5xl mx-auto px-4 sm:px-6 py-6 text-center sm:text-left flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 border-t border-slate-200 mt-8">
+    <div>
+      <strong class="text-slate-700">AgroCycle AI</strong> • Apoio simples para decisões no campo. Sempre valide com um agrônomo local.
+    </div>
+    <button type="button" onclick="toggleExperienceModeQuick()" class="font-bold text-emerald-700 hover:underline cursor-pointer">
+      Alternar entre Modo Produtor e Modo Técnico
+    </button>
+  </footer>
+
+  <!-- MODAL: COMPARAR OUTRAS OPÇÕES DE PLANO -->
+  <div id="compare-plans-modal" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 my-8 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+        <div>
+          <span class="text-[11px] font-extrabold uppercase text-emerald-700">Escolha o plano que preferir</span>
+          <h3 class="text-lg font-extrabold text-slate-900">Comparar as 3 Opções de Plantio</h3>
+        </div>
+        <button onclick="toggleComparePlansModal()" class="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div id="modal-plans-list" class="grid grid-cols-1 md:grid-cols-3 gap-3.5"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: RELATÓRIO WHATSAPP / PDF -->
+  <div id="report-modal" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 my-8">
+      <div class="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+        <div>
+          <span class="text-[11px] font-extrabold uppercase text-emerald-700">Pronto para compartilhar</span>
+          <h3 class="text-lg font-extrabold text-slate-900">Resumo do Seu Plano de Safra</h3>
+        </div>
+        <button onclick="closeReportModal()" class="no-print p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div id="report-content" class="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs font-mono text-slate-800 whitespace-pre-wrap max-h-80 overflow-y-auto leading-relaxed"></div>
+
+      <div class="no-print flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
+        <button onclick="copyReportToClipboard()" class="inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-extrabold shadow cursor-pointer">
+          <i data-lucide="copy" class="w-4 h-4"></i> Copiar para WhatsApp
+        </button>
+        <div class="flex items-center gap-2">
+          <button onclick="window.print()" class="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer">
+            <i data-lucide="printer" class="w-4 h-4"></i> Salvar PDF
+          </button>
+          <button onclick="closeReportModal()" class="px-4 py-3 rounded-2xl border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-bold cursor-pointer">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TRADUTOR & METODOLOGIA (MODO TÉCNICO) -->
+  <div id="translator-modal" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 id="trans-title" class="text-base font-extrabold text-slate-900">Indicador</h3>
+        <button onclick="closeTranslatorModal()" class="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div id="trans-body" class="text-xs sm:text-sm text-slate-700 space-y-2 leading-relaxed"></div>
+    </div>
+  </div>
+
+  <div id="science-modal" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 my-8">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="text-base font-extrabold text-slate-900">Metodologia Científica & Fontes Orbitais</h3>
+        <button onclick="closeScienceModal()" class="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="text-xs text-slate-700 space-y-2 leading-relaxed">
+        <p><strong>Climatologia:</strong> NASA POWER API (T2M, T2M_MIN, PRECTOTCORR, ALLSKY_SFC_SW_DWN).</p>
+        <p><strong>Vegetação:</strong> Microsoft Planetary Computer STAC (Sentinel-2 L2A, NDVI = (B08 - B04)/(B08 + B04)).</p>
+        <p><strong>Balanço Hídrico & Quebra de Safra:</strong> FAO-56 (Hargreaves-Samani), FAO-33 (fator Ky), SoilGrids v2.0 (ISRIC), Open-Meteo API e classificação de solo ZARC (Tipos 1, 2 e 3).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- MODULAR SCRIPTS (BACKEND ENGINE + FRONTEND UI)                        -->
+  <!-- ===================================================================== -->
+  <script src="backend/engine/presets.js"></script>
+  <script src="backend/engine/agronomic-engine.js"></script>
+  <script src="backend/engine/orbital-services.js"></script>
+  <script src="frontend/js/ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,2940 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgroCycle AI — Planejador Simples de Safra</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f4f7f5;
+      color: #0f172a;
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 8px;
+      border-radius: 999px;
+      background: #cbd5e1;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #059669;
+      cursor: pointer;
+      border: 3px solid #ffffff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    }
+    #map {
+      height: 360px;
+      width: 100%;
+      border-radius: 1rem;
+      z-index: 10;
+    }
+    @media (max-width: 640px) {
+      #map {
+        height: 270px;
+      }
+    }
+    @media print {
+      body * { visibility: hidden; }
+      #report-modal, #report-modal * { visibility: visible; }
+      #report-modal {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        background: white !important;
+      }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="antialiased selection:bg-emerald-600 selection:text-white">
+
+  <!-- Toast / Notification Container -->
+  <div id="toast-box" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- ===================================================================== -->
+  <!-- HEADER LIMPO E ACESSÍVEL                                              -->
+  <!-- ===================================================================== -->
+  <header class="bg-emerald-950 text-white sticky top-0 z-40 shadow-md">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 py-3">
+      <div class="flex items-center justify-between gap-3">
+        <!-- Brand -->
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow">
+            <i data-lucide="sprout" class="w-6 h-6 text-white"></i>
+          </div>
+          <div>
+            <h1 class="text-lg sm:text-xl font-extrabold tracking-tight text-white leading-none">
+              AgroCycle <span class="text-emerald-400">AI</span>
+            </h1>
+            <p id="header-subtitle" class="text-xs text-emerald-200/90 mt-1">
+              Ajuda simples para planejar sua roça e evitar perdas
+            </p>
+          </div>
+        </div>
+
+        <!-- Discrete Mode Switcher -->
+        <div class="flex items-center gap-2">
+          <div class="inline-flex p-1 rounded-xl bg-emerald-900/90 border border-emerald-800">
+            <button id="btn-mode-produtor" onclick="setExperienceMode('produtor')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer bg-emerald-500 text-slate-950 shadow-sm">
+              👨🌾 Produtor
+            </button>
+            <button id="btn-mode-tecnico" onclick="setExperienceMode('tecnico')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer text-emerald-100 hover:text-white">
+              🛰️ Técnico
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Technical Telemetry Bar (Hidden in Produtor Mode) -->
+      <div id="telemetry-bar" class="hidden mt-3 pt-2.5 border-t border-emerald-900 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="status-nasa-power" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 text-amber-300 border border-slate-700">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> NASA POWER: Conectando...
+          </span>
+          <span id="status-stac" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 text-amber-300 border border-slate-700">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> STAC Sentinel-2: Consultando...
+          </span>
+          <span id="status-backend" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-900 text-slate-300 border border-slate-700">
+            <span class="w-2 h-2 rounded-full bg-slate-400"></span> Motor: Offline-First
+          </span>
+          <button onclick="openScienceModal()" class="text-emerald-300 hover:underline font-semibold ml-1 cursor-pointer">
+            Ver Fórmulas & Fontes
+          </button>
+        </div>
+        <div id="coords-display" class="text-emerald-200/70 font-mono text-[11px]">
+          Lat: -24.0458° | Lon: -52.3831°
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 py-5 sm:py-7 space-y-6">
+
+    <!-- ===================================================================== -->
+    <!-- BARRA DE PROGRESSO GUIADA (3 PASSOS CLAROS - MODO PRODUTOR)            -->
+    <!-- ===================================================================== -->
+    <nav id="wizard-nav" aria-label="Etapas do planejamento" class="grid grid-cols-3 gap-2 sm:gap-3">
+      <button type="button" onclick="goToWizardStep(1)" id="wiz-btn-1" class="flex flex-col sm:flex-row items-center sm:items-center gap-1.5 sm:gap-3 p-3 rounded-2xl border-2 border-emerald-600 bg-white shadow-sm text-center sm:text-left transition cursor-pointer">
+        <span class="w-7 h-7 rounded-full bg-emerald-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0">1</span>
+        <div class="min-w-0">
+          <div class="text-xs sm:text-sm font-extrabold text-slate-900 leading-tight">Sua Terra</div>
+          <div class="hidden sm:block text-[11px] text-slate-500">Onde fica a roça</div>
+        </div>
+      </button>
+
+      <button type="button" onclick="goToWizardStep(2)" id="wiz-btn-2" class="flex flex-col sm:flex-row items-center sm:items-center gap-1.5 sm:gap-3 p-3 rounded-2xl border border-slate-200 bg-white/80 hover:border-emerald-400 text-center sm:text-left transition cursor-pointer">
+        <span class="w-7 h-7 rounded-full bg-slate-200 text-slate-700 text-xs font-extrabold flex items-center justify-center shrink-0">2</span>
+        <div class="min-w-0">
+          <div class="text-xs sm:text-sm font-extrabold text-slate-900 leading-tight">Sua Lavoura</div>
+          <div class="hidden sm:block text-[11px] text-slate-500">O que vai plantar</div>
+        </div>
+      </button>
+
+      <button type="button" onclick="goToWizardStep(3)" id="wiz-btn-3" class="flex flex-col sm:flex-row items-center sm:items-center gap-1.5 sm:gap-3 p-3 rounded-2xl border border-slate-200 bg-white/80 hover:border-emerald-400 text-center sm:text-left transition cursor-pointer">
+        <span class="w-7 h-7 rounded-full bg-slate-200 text-slate-700 text-xs font-extrabold flex items-center justify-center shrink-0">3</span>
+        <div class="min-w-0">
+          <div class="text-xs sm:text-sm font-extrabold text-slate-900 leading-tight">Seu Plano</div>
+          <div class="hidden sm:block text-[11px] text-slate-500">O que fazer agora</div>
+        </div>
+      </button>
+    </nav>
+
+    <!-- ===================================================================== -->
+    <!-- PASSO 1: ONDE FICA SUA ROÇA E COMO ESTÁ A TERRA                       -->
+    <!-- ===================================================================== -->
+    <section id="etapa-1" class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <span id="e1-eyebrow" class="text-xs font-extrabold uppercase tracking-wider text-emerald-700">Passo 1 de 3</span>
+          <h2 id="e1-title" class="text-xl sm:text-2xl font-extrabold text-slate-900 mt-0.5">Onde fica sua propriedade?</h2>
+          <p id="e1-desc" class="text-xs sm:text-sm text-slate-600 mt-1">Use o GPS do celular, escolha uma região ou toque direto no mapa.</p>
+        </div>
+
+        <!-- Unit Converter (Hectares vs Alqueires) -->
+        <div class="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 self-start sm:self-center">
+          <span class="text-[11px] font-bold text-slate-600 pl-2">Medida:</span>
+          <select id="area-unit-select" onchange="updateAreaDisplay()" class="bg-white text-slate-900 text-xs font-bold rounded-lg px-2.5 py-1.5 border border-slate-200 focus:outline-none cursor-pointer">
+            <option value="ha" selected>Hectares (ha)</option>
+            <option value="alq_sp">Alqueire Paulista (2,42 ha)</option>
+            <option value="alq_mg">Alqueire Mineiro (4,84 ha)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="p-5 sm:p-6 space-y-5">
+        <!-- Big Friendly Location Actions -->
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+          <button type="button" onclick="useDeviceGPS()" class="sm:col-span-5 flex items-center justify-center gap-2.5 py-3.5 px-4 rounded-2xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-sm shadow-sm transition cursor-pointer">
+            <i data-lucide="locate-fixed" class="w-5 h-5"></i>
+            <span>Usar minha localização (GPS)</span>
+          </button>
+
+          <div class="sm:col-span-7 flex items-center gap-2 bg-slate-50 border border-slate-300 rounded-2xl px-3.5 py-2">
+            <i data-lucide="map-pin" class="w-5 h-5 text-emerald-600 shrink-0"></i>
+            <div class="w-full">
+              <label for="region-select" class="block text-[10px] font-bold uppercase text-slate-500">Ou escolha uma região de exemplo:</label>
+              <select id="region-select" onchange="selectPresetRegion(this.value)" class="w-full bg-transparent text-slate-900 text-sm font-bold focus:outline-none cursor-pointer">
+                <option value="campo_mourao" selected>Campo Mourão - PR (Sul • Terra Roxa)</option>
+                <option value="sorriso">Sorriso - MT (Centro-Oeste • Cerrado)</option>
+                <option value="rio_verde">Rio Verde - GO (Sudoeste Goiano)</option>
+                <option value="petrolina">Petrolina - PE (Semiárido)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Map + Health Summary Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <!-- Map Column (7 cols) -->
+          <div class="lg:col-span-7 space-y-2.5">
+            <div class="relative">
+              <div id="map" class="border border-slate-300 shadow-inner"></div>
+              <!-- Floating Area Pill -->
+              <div class="absolute bottom-3 left-3 z-20 bg-slate-900/90 backdrop-blur text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow flex items-center gap-2">
+                <span>📐 Tamanho marcado:</span>
+                <span id="polygon-area" class="text-emerald-400">84,5 ha</span>
+              </div>
+            </div>
+
+            <!-- Collapsible Advanced Map Tools -->
+            <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <span class="text-xs text-slate-500">💡 Dica: toque em qualquer ponto do mapa para mudar o local.</span>
+              <button type="button" onclick="toggleAdvancedMapTools()" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer">
+                ✏️ Desenhar contorno exato da roça
+              </button>
+            </div>
+
+            <div id="advanced-map-tools" class="hidden p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+              <div class="flex flex-wrap items-center gap-2">
+                <button id="btn-draw-poly" onclick="toggleDrawMode()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition cursor-pointer">
+                  <i data-lucide="pen-tool" class="w-3.5 h-3.5"></i> Marcar cantos da terra
+                </button>
+                <button id="btn-finish-poly" onclick="finishPolygon()" class="hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-slate-950 transition cursor-pointer">
+                  <i data-lucide="check" class="w-3.5 h-3.5"></i> Fechar desenho
+                </button>
+                <button onclick="resetPolygonToPreset()" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 transition cursor-pointer">
+                  <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> Voltar ao padrão
+                </button>
+              </div>
+              <div id="draw-instruction" class="hidden bg-amber-50 border border-amber-300 text-amber-900 px-3 py-2 rounded-xl text-xs flex items-center justify-between">
+                <span>Toque nos cantos do seu terreno no mapa (mínimo 3 pontos) e clique em <strong>Fechar desenho</strong>.</span>
+                <span id="vertex-count" class="font-bold ml-2">0 pontos</span>
+              </div>
+            </div>
+
+            <!-- NDVI Overlay Controls (Technical Mode Only) -->
+            <div id="ndvi-controls-bar" class="hidden flex flex-wrap items-center justify-between gap-3 bg-emerald-950/5 p-3 rounded-xl border border-emerald-200">
+              <label class="inline-flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-800">
+                <input type="checkbox" id="toggle-ndvi-layer" checked onchange="toggleNdviLayer(this.checked)" class="rounded text-emerald-600 w-4 h-4">
+                <span>Camada NDVI Satélite</span>
+              </label>
+              <span id="ndvi-layer-mode-badge" class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                Carregando...
+              </span>
+              <div class="flex items-center gap-2 text-[11px] font-semibold text-slate-700">
+                <span>Opacidade:</span>
+                <input type="range" id="ndvi-opacity" min="0.1" max="1" step="0.05" value="0.75" oninput="updateNdviOpacity(this.value)" class="w-20 h-1.5">
+                <span id="ndvi-opacity-val" class="w-8 text-right font-mono">75%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Visual Health Cards (5 cols) -->
+          <div class="lg:col-span-5 space-y-3.5">
+            <!-- Farmer Simple Gauges -->
+            <div id="farmer-visual-gauges" class="space-y-3">
+              <div class="text-xs font-extrabold uppercase tracking-wider text-slate-500">
+                O que o satélite vê na sua terra hoje:
+              </div>
+
+              <!-- Card 1: Água na terra -->
+              <div class="p-4 rounded-2xl border border-amber-200 bg-amber-50/60 space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <span class="text-2xl">💧</span>
+                    <div>
+                      <div class="text-[11px] font-bold text-slate-600 uppercase">Água guardada na terra</div>
+                      <div id="fg-water-status" class="text-base font-extrabold text-amber-900">Umidade Média</div>
+                    </div>
+                  </div>
+                  <span id="fg-water-pill" class="px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-200/80 text-amber-950">Atenção</span>
+                </div>
+                <div class="w-full h-2.5 bg-white rounded-full overflow-hidden border border-amber-200/70">
+                  <div id="fg-water-bar" class="h-full bg-amber-500 rounded-full transition-all duration-500" style="width: 60%"></div>
+                </div>
+                <p id="fg-water-tip" class="text-xs text-slate-700 leading-relaxed">
+                  A terra seca rápido se ficar sem cobertura. Palhada ajuda a segurar a chuva.
+                </p>
+              </div>
+
+              <!-- Card 2: Cobertura verde -->
+              <div class="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <span class="text-2xl">🌿</span>
+                    <div>
+                      <div class="text-[11px] font-bold text-slate-600 uppercase">Verde / Cobertura da roça</div>
+                      <div id="fg-ndvi-status" class="text-base font-extrabold text-emerald-900">Bom Verde</div>
+                    </div>
+                  </div>
+                  <span id="fg-ndvi-pill" class="px-2.5 py-1 rounded-full text-xs font-extrabold bg-emerald-200/80 text-emerald-950">Bom</span>
+                </div>
+                <div class="w-full h-2.5 bg-white rounded-full overflow-hidden border border-emerald-200/70">
+                  <div id="fg-ndvi-bar" class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: 65%"></div>
+                </div>
+                <p class="text-xs text-slate-700 leading-relaxed">
+                  No mapa: <strong>verde</strong> mostra planta forte; <strong>vermelho/amarelo</strong> mostra terra descoberta.
+                </p>
+              </div>
+
+              <!-- Card 3: Clima da região -->
+              <div class="p-4 rounded-2xl border border-sky-200 bg-sky-50/60 space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-extrabold text-slate-700 uppercase">🌦️ Clima da Região</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                  <div class="bg-white p-2.5 rounded-xl border border-sky-100 text-center">
+                    <div id="fg-temp" class="text-sm font-extrabold text-slate-900">22.8 °C</div>
+                    <div class="text-[10px] text-slate-500 mt-0.5">Calor médio</div>
+                  </div>
+                  <div class="bg-white p-2.5 rounded-xl border border-sky-100 text-center">
+                    <div id="fg-rain" class="text-sm font-extrabold text-slate-900">1.480 mm</div>
+                    <div class="text-[10px] text-slate-500 mt-0.5">Chuva/ano</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Technical Diagnostics Panel (Hidden in Produtor Mode) -->
+            <div id="tech-diagnostics-panel" class="hidden space-y-3">
+              <div class="p-3.5 rounded-xl border border-amber-200 bg-amber-50/60">
+                <div class="flex items-center justify-between">
+                  <div class="text-xs font-bold text-slate-900">Umidade Residual (NASA SMAP)</div>
+                  <button onclick="openTranslatorModal('smap')" class="text-[11px] font-semibold text-emerald-800 underline cursor-pointer">Explicar</button>
+                </div>
+                <div id="val-smap" class="text-sm font-extrabold text-amber-800 mt-1">21.4% vol • Déficit (-14%)</div>
+              </div>
+
+              <div class="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/60">
+                <div class="flex items-center justify-between">
+                  <div class="text-xs font-bold text-slate-900">Vigor NDVI (STAC Sentinel-2)</div>
+                  <button onclick="openTranslatorModal('ndvi')" class="text-[11px] font-semibold text-emerald-800 underline cursor-pointer">Explicar</button>
+                </div>
+                <div id="val-ndvi" class="text-sm font-extrabold text-emerald-800 mt-1">NDVI 0.59</div>
+                <p id="desc-ndvi" class="text-xs text-slate-600 mt-1"></p>
+              </div>
+
+              <div class="p-3.5 rounded-xl border border-slate-200 bg-slate-50">
+                <div class="text-xs font-bold text-slate-800 mb-2">Balanço Hídrico & Radiação (FAO-56)</div>
+                <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                  <div class="bg-white p-2 rounded-lg border border-slate-200">
+                    <div class="text-[10px] text-slate-500">ET₀</div>
+                    <div id="metric-et0" class="font-bold text-emerald-800">4.12 mm/d</div>
+                  </div>
+                  <div class="bg-white p-2 rounded-lg border border-slate-200">
+                    <div class="text-[10px] text-slate-500">Radiação</div>
+                    <div id="metric-solar" class="font-bold text-slate-900">18.4 MJ</div>
+                  </div>
+                  <div class="bg-white p-2 rounded-lg border border-slate-200">
+                    <div class="text-[10px] text-slate-500">Balanço</div>
+                    <div id="metric-bh" class="font-bold text-slate-900">-24 mm</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Next Step CTA -->
+            <div id="wiz-footer-1" class="pt-1">
+              <button type="button" onclick="goToWizardStep(2)" class="w-full py-4 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-base shadow-md transition flex items-center justify-center gap-2 cursor-pointer">
+                <span>Continuar para o Passo 2</span>
+                <i data-lucide="arrow-right" class="w-5 h-5"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Historical Chart (Technical Mode Only) -->
+        <div id="historical-player-box" class="hidden bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-xs font-bold uppercase text-slate-700">Série Histórica SMAP & Solo Nu (2021–2026)</h3>
+            <span id="selected-year-badge" class="px-2.5 py-0.5 rounded-lg bg-emerald-900 text-white text-xs font-bold">2026</span>
+          </div>
+          <input type="range" id="year-slider" min="2021" max="2026" step="1" value="2026" oninput="updateYearView(this.value)" class="w-full">
+          <div class="h-40 w-full"><canvas id="historicalChart"></canvas></div>
+          <p id="bare-soil-text" class="text-xs text-amber-900 bg-amber-50 p-2.5 rounded-xl border border-amber-200"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- PASSO 2: PERGUNTAS SIMPLES SOBRE A LAVOURA                            -->
+    <!-- ===================================================================== -->
+    <section id="etapa-2" class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="p-5 sm:p-6 border-b border-slate-100">
+        <span id="e2-eyebrow" class="text-xs font-extrabold uppercase tracking-wider text-emerald-700">Passo 2 de 3</span>
+        <h2 id="e2-title" class="text-xl sm:text-2xl font-extrabold text-slate-900 mt-0.5">Conte como é a sua lavoura</h2>
+        <p class="text-xs sm:text-sm text-slate-600 mt-1">Toque nas opções abaixo. O plano se adapta às suas máquinas e à sua terra.</p>
+      </div>
+
+      <div class="p-5 sm:p-6 space-y-6">
+        <!-- PRODUTOR SIMPLE INPUTS -->
+        <div id="farmer-visual-inputs" class="space-y-6">
+          <!-- Question 1: Cultura -->
+          <div>
+            <label class="block text-sm font-extrabold text-slate-900 mb-2.5">1. Qual é a sua plantação principal?</label>
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+              <button type="button" onclick="quickSelectField('crop','soja', this)" data-val="soja" class="quick-crop-btn p-3.5 rounded-2xl border-2 border-emerald-600 bg-emerald-50 text-center transition cursor-pointer">
+                <div class="text-2xl">🌱</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Soja</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','milho', this)" data-val="milho" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">🌽</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Milho</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','feijao', this)" data-val="feijao" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">🫘</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Feijão</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','mandioca', this)" data-val="mandioca" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">🥔</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Mandioca</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','algodao', this)" data-val="algodao" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">☁️</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Algodão</div>
+              </button>
+              <button type="button" onclick="quickSelectField('crop','trigo', this)" data-val="trigo" class="quick-crop-btn p-3.5 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-2xl">🌾</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-1">Trigo</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Question 2 & 3: Solo & Água -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label class="block text-sm font-extrabold text-slate-900 mb-2">2. Como é o tipo de terra?</label>
+              <div class="grid grid-cols-3 gap-2.5">
+                <button type="button" onclick="quickSelectField('soil','argiloso', this)" class="quick-soil-btn p-3 rounded-2xl border-2 border-emerald-600 bg-emerald-50 text-center transition cursor-pointer">
+                  <div class="flex justify-center"><img src="https://cdn-icons-png.flaticon.com/512/105/105527.png" alt="Terreno" class="w-6 h-6 object-contain"></div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Terra Roxa / Barro</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Segura mais água</div>
+                </button>
+                <button type="button" onclick="quickSelectField('soil','franco', this)" class="quick-soil-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                  <div class="flex justify-center"><img src="https://cdn-icons-png.flaticon.com/512/105/105527.png" alt="Terreno" class="w-6 h-6 object-contain"></div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Terra Mista</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Equilibrada</div>
+                </button>
+                <button type="button" onclick="quickSelectField('soil','arenoso', this)" class="quick-soil-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                  <div class="flex justify-center"><img src="https://cdn-icons-png.flaticon.com/512/105/105527.png" alt="Terreno" class="w-6 h-6 object-contain"></div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Arenosa</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Seca mais rápido</div>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-sm font-extrabold text-slate-900 mb-2">3. Como a lavoura recebe água?</label>
+              <div class="grid grid-cols-2 gap-2.5">
+                <button type="button" onclick="quickSelectField('irrigation','sequeiro', this)" class="quick-irr-btn p-3 rounded-2xl border-2 border-emerald-600 bg-emerald-50 text-center transition cursor-pointer">
+                  <div class="text-xl">🌧️</div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Só Chuva (Sequeiro)</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Depende do clima</div>
+                </button>
+                <button type="button" onclick="quickSelectField('irrigation','irrigado', this)" class="quick-irr-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                  <div class="text-xl">💧</div>
+                  <div class="text-xs font-extrabold text-slate-900 mt-1">Tenho Irrigação</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">Pivô ou gotejo</div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Question 4: Fase do Plantio -->
+          <div>
+            <label class="block text-sm font-extrabold text-slate-900 mb-2">4. Em que ponto está o plantio hoje?</label>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <button type="button" onclick="selectDapPreset(0, this)" class="quick-dap-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-lg">🌰</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-0.5">Vou plantar ainda</div>
+              </button>
+              <button type="button" onclick="selectDapPreset(20, this)" class="quick-dap-btn p-3 rounded-2xl border-2 border-emerald-600 bg-emerald-50 text-center transition cursor-pointer">
+                <div class="text-lg">🌱</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-0.5">Começando (20 dias)</div>
+              </button>
+              <button type="button" onclick="selectDapPreset(50, this)" class="quick-dap-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-lg">🌼</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-0.5">Na florada (50 dias)</div>
+              </button>
+              <button type="button" onclick="selectDapPreset(80, this)" class="quick-dap-btn p-3 rounded-2xl border border-slate-200 bg-white hover:border-emerald-400 text-center transition cursor-pointer">
+                <div class="text-lg">🌾</div>
+                <div class="text-xs font-extrabold text-slate-900 mt-0.5">Enchendo grão (80d)</div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Question 5 & 6: Maquinário + Objetivo em 2 cartões limpos -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-2.5">
+              <div class="text-sm font-extrabold text-slate-900">5. Tem caixa para semente miúda?</div>
+              <p class="text-xs text-slate-600">Ex: braquiária ou crotalária. Se não tiver, sugerimos só sementes que passam na plantadeira comum.</p>
+              <div class="grid grid-cols-2 gap-2 pt-1">
+                <button type="button" id="simple-miudas-sim" onclick="setSimpleMiudas(true)" class="py-2.5 px-3 rounded-xl text-xs font-extrabold bg-emerald-600 text-white cursor-pointer transition">
+                  ✓ Sim, tenho
+                </button>
+                <button type="button" id="simple-miudas-nao" onclick="setSimpleMiudas(false)" class="py-2.5 px-3 rounded-xl text-xs font-extrabold bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition">
+                  ✗ Não tenho
+                </button>
+              </div>
+            </div>
+
+            <div class="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-2.5">
+              <div class="text-sm font-extrabold text-slate-900">6. O que é mais importante para você agora?</div>
+              <div class="grid grid-cols-3 gap-2 pt-1">
+                <button type="button" onclick="applyFarmerGoal('caixa', this)" class="goal-btn p-2.5 rounded-xl border border-slate-200 bg-white hover:border-emerald-500 text-center cursor-pointer transition">
+                  <div class="text-base">💰</div>
+                  <div class="text-[11px] font-extrabold text-slate-900 mt-0.5">Dinheiro rápido</div>
+                </button>
+                <button type="button" onclick="applyFarmerGoal('equilibrio', this)" class="goal-btn p-2.5 rounded-xl border-2 border-emerald-600 bg-emerald-50 text-center cursor-pointer transition">
+                  <div class="text-base">⚖️</div>
+                  <div class="text-[11px] font-extrabold text-slate-900 mt-0.5">Equilíbrio</div>
+                </button>
+                <button type="button" onclick="applyFarmerGoal('solo', this)" class="goal-btn p-2.5 rounded-xl border border-slate-200 bg-white hover:border-emerald-500 text-center cursor-pointer transition">
+                  <div class="text-base">🛡️</div>
+                  <div class="text-[11px] font-extrabold text-slate-900 mt-0.5">Proteger a terra</div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TECHNICAL INPUTS (Hidden in Produtor Mode) -->
+        <div id="tech-panel-step2" class="hidden space-y-5">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Cultura Principal</label>
+              <select id="input-crop" onchange="runSimulation()" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold">
+                <option value="soja" selected>Soja</option>
+                <option value="milho">Milho</option>
+                <option value="feijao">Feijão</option>
+                <option value="mandioca">Mandioca</option>
+                <option value="algodao">Algodão</option>
+                <option value="trigo">Trigo</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Textura do Solo (ZARC)</label>
+              <select id="input-soil" onchange="runSimulation()" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold">
+                <option value="argiloso" selected>Tipo 3 - Argiloso (&gt;35%)</option>
+                <option value="franco">Tipo 2 - Médio (15–35%)</option>
+                <option value="arenoso">Tipo 1 - Arenoso (&lt;15%)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Compactação</label>
+              <select id="input-compaction" onchange="runSimulation()" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold">
+                <option value="baixo">Baixa</option>
+                <option value="medio" selected>Média</option>
+                <option value="alto">Alta</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Regime Hídrico</label>
+              <select id="input-irrigation" onchange="runSimulation()" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold">
+                <option value="sequeiro" selected>Sequeiro</option>
+                <option value="irrigado">Irrigado</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+            <div>
+              <div class="flex justify-between text-xs font-bold mb-1"><span>pH (CaCl₂)</span><span id="val-ph" class="text-emerald-700">5.6</span></div>
+              <input type="range" id="input-ph" min="4.5" max="7.2" step="0.1" value="5.6" oninput="document.getElementById('val-ph').textContent = this.value; runSimulation()" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between text-xs font-bold mb-1"><span>Matéria Orgânica</span><span id="val-mo" class="text-emerald-700">2.4%</span></div>
+              <input type="range" id="input-mo" min="0.8" max="5.5" step="0.1" value="2.4" oninput="document.getElementById('val-mo').textContent = this.value + '%'; runSimulation()" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between text-xs font-bold mb-1"><span>Dias Após Plantio (DAP)</span><span id="val-dap" class="text-emerald-700">20 dias</span></div>
+              <input type="range" id="input-dap" min="0" max="120" step="5" value="20" oninput="document.getElementById('val-dap').textContent = this.value + ' dias'; runSimulation()" class="w-full">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div class="p-3.5 rounded-xl border border-slate-200 space-y-2">
+              <div class="font-bold text-slate-800">Maquinário Disponível</div>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mach-conv" checked onchange="runSimulation()"> Plantadeira Convencional</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mach-miudas" checked onchange="runSimulation()"> Caixa Sementes Miúdas</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mach-colhedora" checked onchange="runSimulation()"> Colhedora Própria</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mach-rolofaca" onchange="runSimulation()"> Rolofaca / Triturador</label>
+            </div>
+            <div class="p-3.5 rounded-xl border border-slate-200 space-y-2">
+              <div class="font-bold text-slate-800">Mercado & Escoamento</div>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mkt-graos" checked onchange="runSimulation()"> Cooperativa / Armazém</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mkt-pecuaria" checked onchange="runSimulation()"> Pecuária / Pastejo (ILP)</label>
+              <label class="flex items-center gap-2"><input type="checkbox" id="mkt-cobertura" checked onchange="runSimulation()"> Sementes de Cobertura</label>
+              <div id="constraint-feedback" class="text-[11px] text-emerald-800 bg-emerald-50 p-2 rounded-lg"></div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-emerald-950 text-white p-4 rounded-2xl text-xs">
+            <div>
+              <div class="flex justify-between font-bold mb-1"><span>Caixa vs Solo</span><span id="prio-balance-label">40% / 60%</span></div>
+              <input type="range" id="prio-soil-vs-cash" min="0" max="100" value="60" oninput="updatePriorityLabels(); runSimulation()" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between font-bold mb-1"><span>Peso Água</span><span id="prio-water-val">75%</span></div>
+              <input type="range" id="prio-water" min="0" max="100" value="75" oninput="updatePriorityLabels(); runSimulation()" class="w-full">
+            </div>
+            <div>
+              <div class="flex justify-between font-bold mb-1"><span>Peso Pragas</span><span id="prio-pest-val">70%</span></div>
+              <input type="range" id="prio-pest" min="0" max="100" value="70" oninput="updatePriorityLabels(); runSimulation()" class="w-full">
+            </div>
+          </div>
+        </div>
+
+        <!-- Wizard Step 2 Navigation Buttons -->
+        <div id="wiz-footer-2" class="flex flex-col sm:flex-row gap-3 pt-2">
+          <button type="button" onclick="goToWizardStep(1)" class="sm:w-1/3 py-3.5 px-4 rounded-2xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 font-bold text-sm transition flex items-center justify-center gap-2 cursor-pointer">
+            <i data-lucide="arrow-left" class="w-4 h-4"></i> Voltar ao Mapa
+          </button>
+          <button type="button" onclick="goToWizardStep(3)" class="sm:w-2/3 py-4 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-base shadow-md transition flex items-center justify-center gap-2 cursor-pointer">
+            <span>Ver Meu Plano Pronto</span>
+            <i data-lucide="arrow-right" class="w-5 h-5"></i>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================== -->
+    <!-- PASSO 3: CARTÃO ÚNICO DE DECISÃO E PREVENÇÃO                          -->
+    <!-- ===================================================================== -->
+    <section id="etapa-3" class="space-y-5">
+      <!-- Unified Simple Decision Card (Produtor Mode) -->
+      <div id="farmer-decision-hub" class="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+        <!-- Traffic Light Banner -->
+        <div id="semaphore-banner" class="p-5 sm:p-6 bg-emerald-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="flex items-start gap-3.5">
+            <div id="semaphore-icon" class="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-2xl shrink-0">
+              🟢
+            </div>
+            <div>
+              <div class="text-xs font-extrabold uppercase tracking-wider text-emerald-300">Passo 3 de 3 • Resumo para sua roça</div>
+              <h2 id="semaphore-title" class="text-lg sm:text-2xl font-extrabold text-white mt-0.5">Terra em boas condições para plantar</h2>
+              <p id="semaphore-subtitle" class="text-xs sm:text-sm text-emerald-100/90 mt-1">Umidade adequada e baixo risco imediato. Siga o plano abaixo para proteger sua safra.</p>
+            </div>
+          </div>
+          <div id="semaphore-area-badge" class="bg-white/10 border border-white/20 px-4 py-2.5 rounded-2xl text-right shrink-0 self-start sm:self-center">
+            <div class="text-[10px] uppercase font-bold text-emerald-200">Área calculada</div>
+            <div id="summary-area-text" class="text-base font-extrabold text-white">84,5 ha</div>
+          </div>
+        </div>
+
+        <div class="p-5 sm:p-6 space-y-6">
+          <!-- 3-Cycle Simple Roadmap -->
+          <div>
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h3 id="recommended-plan-title" class="text-base sm:text-lg font-extrabold text-slate-900">
+                🌱 O que plantar nas próximas 3 safras
+              </h3>
+              <button type="button" onclick="toggleComparePlansModal()" class="text-xs font-bold text-emerald-700 hover:underline cursor-pointer">
+                Ver outras 2 opções de plano
+              </button>
+            </div>
+
+            <div id="simple-3-cycles" class="grid grid-cols-1 md:grid-cols-3 gap-3.5"></div>
+          </div>
+
+          <!-- Financial & Fertilizer Savings Highlight -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center gap-3.5">
+              <div class="w-11 h-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xl shrink-0">💰</div>
+              <div>
+                <div class="text-xs font-bold text-emerald-900">Sobra estimada na propriedade</div>
+                <div id="simple-total-margin" class="text-xl font-extrabold text-slate-900">R$ 325.325</div>
+                <div id="simple-unit-margin" class="text-[11px] text-emerald-800 font-semibold">R$ 3.850 por hectare</div>
+              </div>
+            </div>
+
+            <div class="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-center gap-3.5">
+              <div class="w-11 h-11 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center text-xl shrink-0">🌿</div>
+              <div>
+                <div class="text-xs font-bold text-amber-950">Economia estimada com adubo</div>
+                <div id="simple-urea-saved" class="text-base font-extrabold text-slate-900">R$ 391/ha em ureia</div>
+                <div class="text-[11px] text-amber-900 font-medium">A própria planta aduba a terra</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 1-Tap Weather Stress Test -->
+          <div class="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3.5">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div class="text-sm font-extrabold text-slate-900">🌦️ Teste rápido: e se o clima virar?</div>
+                <p class="text-xs text-slate-600">Toque para ver como este plano segura a produção se faltar chuva ou esfriar:</p>
+              </div>
+              <div id="simple-resilience-pill" class="px-3 py-1.5 rounded-xl bg-emerald-100 text-emerald-900 text-xs font-extrabold self-start sm:self-center">
+                🛡️ Segura 91% da colheita
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button type="button" onclick="selectRiskSimulation('normal', this)" class="risk-sim-btn py-2.5 px-3 rounded-xl border-2 border-emerald-600 bg-emerald-50 text-xs font-extrabold text-slate-900 cursor-pointer transition">
+                ☀️ Ano Normal
+              </button>
+              <button type="button" onclick="selectRiskSimulation('seca', this)" class="risk-sim-btn py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:border-amber-400 text-xs font-extrabold text-slate-800 cursor-pointer transition">
+                🏜️ Se der Seca
+              </button>
+              <button type="button" onclick="selectRiskSimulation('calor', this)" class="risk-sim-btn py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:border-rose-400 text-xs font-extrabold text-slate-800 cursor-pointer transition">
+                🔥 Muito Calor
+              </button>
+              <button type="button" onclick="selectRiskSimulation('geada', this)" class="risk-sim-btn py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:border-sky-400 text-xs font-extrabold text-slate-800 cursor-pointer transition">
+                ❄️ Se der Geada
+              </button>
+            </div>
+
+            <div id="simple-prevention-tip" class="p-3 rounded-xl bg-white border border-slate-200 text-xs text-slate-700 leading-relaxed">
+              💡 <strong>Dica de proteção:</strong> Manter palhada na entressafra guarda água no solo e reduz em até 70% o risco de perda por falta de chuva.
+            </div>
+          </div>
+
+          <!-- ESTIMATIVA DE PERDAS E CALCULADORA DE VENDAS FUTURAS -->
+          <div id="loss-and-futures-card" class="p-4 sm:p-5 rounded-2xl bg-emerald-950/5 border border-emerald-200 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-extrabold text-slate-900">📊 Estimativa de Perdas e Vendas Futuras (Trava de Safra)</span>
+                  <span id="futures-crop-badge" class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-extrabold uppercase">Soja</span>
+                </div>
+                <p class="text-xs text-slate-600 mt-0.5">Simule quanto pode perder com o clima e descubra quanto da safra é seguro vender antecipado (CPR, Barter ou Contrato Futuro).</p>
+              </div>
+              <button type="button" onclick="applyRecommendedHedge()" class="self-start sm:self-center px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold transition cursor-pointer shrink-0">
+                🛡️ Aplicar Trava Segura
+              </button>
+            </div>
+
+            <!-- Adjustable Market & Yield Inputs -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-white p-3.5 rounded-2xl border border-slate-200">
+              <div>
+                <label for="fut-yield-ha" class="block text-[11px] font-bold text-slate-600">Produtividade Esperada (<span class="fut-unit-label">sc</span>/ha)</label>
+                <input type="number" id="fut-yield-ha" min="1" step="1" value="62" oninput="onFuturesInputChange()" class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-extrabold text-slate-900 focus:outline-none focus:border-emerald-600">
+                <div class="text-[10px] text-slate-500 mt-0.5">Média sem perdas</div>
+              </div>
+
+              <div>
+                <label for="fut-price" class="block text-[11px] font-bold text-slate-600">Preço Venda Futura (R$/<span class="fut-unit-label">sc</span>)</label>
+                <input type="number" id="fut-price" min="1" step="1" value="128" oninput="onFuturesInputChange()" class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-extrabold text-slate-900 focus:outline-none focus:border-emerald-600">
+                <div class="text-[10px] text-slate-500 mt-0.5">Cotação / contrato</div>
+              </div>
+
+              <div>
+                <label for="fut-cost-ha" class="block text-[11px] font-bold text-slate-600">Custo de Produção (R$/ha)</label>
+                <input type="number" id="fut-cost-ha" min="100" step="50" value="4100" oninput="onFuturesInputChange()" class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-extrabold text-slate-900 focus:outline-none focus:border-emerald-600">
+                <div class="text-[10px] text-slate-500 mt-0.5">Semente, adubo, defensivo</div>
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between">
+                  <label for="fut-hedge-pct" class="text-[11px] font-bold text-slate-600">% Venda Antecipada</label>
+                  <span id="fut-hedge-val" class="text-xs font-extrabold text-emerald-700">45%</span>
+                </div>
+                <input type="range" id="fut-hedge-pct" min="0" max="85" step="5" value="45" oninput="onFuturesHedgeSliderChange()" class="mt-2 w-full">
+                <div id="fut-safe-limit-hint" class="text-[10px] font-semibold text-emerald-800 mt-0.5">Limite seguro: até 55%</div>
+              </div>
+            </div>
+
+            <!-- 4 Result Cards: Colheita, Perda/Quebra, Venda Futura, Lucro Líquido -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <!-- Card 1: Produção Líquida Prevista -->
+              <div class="p-3.5 rounded-2xl bg-white border border-slate-200 space-y-1">
+                <div class="text-[10px] font-extrabold uppercase text-slate-500">1. Colheita Prevista (Com Clima)</div>
+                <div id="fut-net-prod" class="text-base sm:text-lg font-extrabold text-slate-900">4.767 sc</div>
+                <div id="fut-potential-prod" class="text-[11px] text-slate-500">Potencial sem perda: 5.239 sc</div>
+                <div id="fut-breakeven-text" class="text-[11px] font-bold text-emerald-800 pt-1">Paga custos com: 29,0 sc/ha</div>
+              </div>
+
+              <!-- Card 2: Estimativa de Perdas -->
+              <div class="p-3.5 rounded-2xl bg-rose-50/70 border border-rose-200 space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-extrabold uppercase text-rose-900">2. Perda Estimada (Quebra)</span>
+                  <span id="fut-loss-pct-badge" class="px-1.5 py-0.5 rounded bg-rose-200 text-rose-950 text-[10px] font-extrabold">-9%</span>
+                </div>
+                <div id="fut-loss-brl" class="text-base sm:text-lg font-extrabold text-rose-700">- R$ 60.416</div>
+                <div id="fut-loss-vol" class="text-[11px] text-rose-900 font-medium">472 sc em risco no clima atual</div>
+                <div id="fut-saved-loss-brl" class="text-[11px] font-bold text-emerald-800 pt-1">🛡️ Plano evita R$ 126.000 em perdas</div>
+              </div>
+
+              <!-- Card 3: Venda Futura (Trava) -->
+              <div class="p-3.5 rounded-2xl bg-sky-50/70 border border-sky-200 space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-extrabold uppercase text-sky-900">3. Venda Futura (Travada)</span>
+                  <span id="fut-hedge-status-badge" class="px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-950 text-[10px] font-extrabold">Trava Segura</span>
+                </div>
+                <div id="fut-hedged-brl" class="text-base sm:text-lg font-extrabold text-slate-900">R$ 274.560</div>
+                <div id="fut-hedged-vol" class="text-[11px] text-slate-600">2.145 sc vendidas no contrato</div>
+                <div id="fut-cost-coverage" class="text-[11px] font-bold text-sky-900 pt-1">Cobre 87% do custo total</div>
+              </div>
+
+              <!-- Card 4: Saldo Livre & Resultado Final -->
+              <div class="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 space-y-1">
+                <div class="text-[10px] font-extrabold uppercase text-emerald-900">4. Lucro Líquido Projetado</div>
+                <div id="fut-net-profit-brl" class="text-base sm:text-lg font-extrabold text-emerald-900">R$ 296.810</div>
+                <div id="fut-net-profit-ha" class="text-[11px] text-emerald-800 font-semibold">R$ 3.512 / ha (c/ economia adubo)</div>
+                <div id="fut-spot-vol" class="text-[11px] text-slate-600 pt-1">Livre p/ venda futura/spot: 2.622 sc</div>
+              </div>
+            </div>
+
+            <!-- Advisory Banner -->
+            <div id="fut-advisory-box" class="p-3 rounded-xl bg-white border border-emerald-200 text-xs text-slate-700 leading-relaxed">
+              💡 <strong>Recomendação de Comercialização:</strong> Com o risco climático atual, trave até <strong>55%</strong> da produção prevista para garantir os custos de plantio sem correr risco de faltar produto para entregar.
+            </div>
+          </div>
+
+          <!-- BÔNUS ADICIONAL: PREVISÃO E ESTIMATIVA HÍDRICA DIÁRIA (AGRO SHIELD) -->
+          <div id="bonus-agroshield-card" class="p-4 sm:p-5 rounded-2xl bg-sky-50/70 border border-sky-200 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-extrabold text-slate-900">💧 Previsão e Estimativa de Água na Raiz</span>
+                  <span class="px-2 py-0.5 rounded-full bg-sky-100 text-sky-900 text-[10px] font-extrabold uppercase">Previsão 7 dias</span>
+                </div>
+                <p class="text-xs text-slate-600 mt-0.5">Simulação do histórico da safra e previsão para os próximos 7 dias usando dados de solo (SoilGrids) e meteorologia (Open-Meteo).</p>
+              </div>
+              <div class="flex items-center gap-2 self-start sm:self-center">
+                <span id="bonus-source-pill" class="px-2.5 py-1 rounded-full bg-white border border-sky-200 text-[11px] font-bold text-sky-900">Pronto</span>
+                <button type="button" onclick="runAgroShieldBonus()" class="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-extrabold transition cursor-pointer">
+                  Atualizar Previsão
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="p-3.5 rounded-2xl bg-white border border-sky-100 space-y-1">
+                <div class="text-[11px] font-bold uppercase text-slate-500">Status Estimado Hoje</div>
+                <div id="bonus-res-status" class="text-lg font-extrabold text-slate-900">-</div>
+                <div id="bonus-res-msg" class="text-xs text-slate-600">Toque em Atualizar Previsão</div>
+                <div class="flex flex-wrap gap-1.5 pt-1">
+                  <span id="bonus-res-soil" class="px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-bold text-slate-700">Solo: -</span>
+                  <span id="bonus-res-cad" class="px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-bold text-slate-700">Máx: -</span>
+                </div>
+              </div>
+
+              <div class="p-3.5 rounded-2xl bg-white border border-sky-100 space-y-2">
+                <div class="text-[11px] font-bold uppercase text-slate-500">Água Estimada na Raiz (Hoje)</div>
+                <div class="text-lg font-extrabold text-slate-900">
+                  <span id="bonus-res-arm">-</span> <span class="text-xs font-semibold text-slate-500">mm</span>
+                </div>
+                <div class="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div id="bonus-res-arm-bar" class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+                <div id="bonus-res-pct" class="text-[11px] font-semibold text-slate-500">0% da capacidade</div>
+              </div>
+
+              <div class="p-3.5 rounded-2xl bg-white border border-sky-100 space-y-1">
+                <div class="text-[11px] font-bold uppercase text-slate-500">Previsão (Próximos 7 Dias)</div>
+                <div id="bonus-res-irr-title" class="text-lg font-extrabold text-emerald-700">-</div>
+                <div id="bonus-res-irr-sub" class="text-xs text-slate-600">Aguardando previsão</div>
+              </div>
+            </div>
+
+            <div class="bg-white p-3.5 rounded-2xl border border-sky-100">
+              <div class="text-xs font-extrabold text-slate-800 mb-2">Evolução e Previsão Diária (Chuva Prevista × Água Estimada no Solo)</div>
+              <div class="relative h-52 w-full">
+                <canvas id="bonusWaterChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Primary Action Buttons -->
+          <div class="flex flex-col sm:flex-row gap-3 pt-1">
+            <button type="button" onclick="goToWizardStep(2)" class="sm:w-1/3 py-3.5 px-4 rounded-2xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 font-bold text-sm transition flex items-center justify-center gap-2 cursor-pointer">
+              <i data-lucide="arrow-left" class="w-4 h-4"></i> Ajustar Respostas
+            </button>
+            <button type="button" onclick="openReportModal()" class="sm:w-2/3 py-4 px-5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-base shadow-lg transition flex items-center justify-center gap-2.5 cursor-pointer">
+              <i data-lucide="share-2" class="w-5 h-5"></i>
+              <span>Enviar Plano no WhatsApp ou Salvar PDF</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- =================================================================== -->
+      <!-- VISÃO TÉCNICA COMPLETA (Oculta no Modo Produtor)                    -->
+      <!-- =================================================================== -->
+      <div id="tech-scenarios-wrapper" class="hidden space-y-5">
+        <div id="agro-shield-panel"></div>
+        <div id="scenarios-container" class="grid grid-cols-1 lg:grid-cols-3 gap-5"></div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+          <div class="lg:col-span-6">
+            <h3 class="text-sm font-bold text-slate-900 mb-2">Matriz Multi-Critério (7 Pilares)</h3>
+            <div class="relative h-72 w-full"><canvas id="radarChart"></canvas></div>
+          </div>
+          <div class="lg:col-span-6 space-y-3">
+            <h3 class="text-sm font-bold text-slate-900">Simulador de Estresse Climático (FAO-33)</h3>
+            <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs">
+              <div>
+                <div class="flex justify-between font-bold mb-1"><span>Variação de Chuva</span><span id="stress-rain-val">0%</span></div>
+                <input type="range" id="stress-rain" min="-30" max="15" step="5" value="0" oninput="updateClimateStress()" class="w-full">
+              </div>
+              <div>
+                <div class="flex justify-between font-bold mb-1"><span>Anomalia Térmica</span><span id="stress-temp-val">+0.0 °C</span></div>
+                <input type="range" id="stress-temp" min="0" max="3.5" step="0.5" value="0" oninput="updateClimateStress()" class="w-full">
+              </div>
+              <label class="flex items-center gap-2 font-bold">
+                <input type="checkbox" id="stress-frost" onchange="updateClimateStress()"> Simular Geada (-2°C)
+              </label>
+            </div>
+            <div id="resilience-cards" class="grid grid-cols-3 gap-2.5"></div>
+          </div>
+        </div>
+
+        <!-- Painel Técnico de Estimativa de Quebra e Hedge Comercial -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900">Matriz de Quebra de Safra (FAO-33) & Hedge de Comercialização Futura</h3>
+              <p class="text-xs text-slate-500">Comparativo financeiro de risco físico, ponto de equilíbrio (break-even) e limite seguro de trava (CPR/Barter) nos 3 cenários.</p>
+            </div>
+            <span id="tech-futures-summary-pill" class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 text-xs font-extrabold self-start sm:self-center">Trava Atual: 45%</span>
+          </div>
+          <div id="tech-futures-table" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="max-w-5xl mx-auto px-4 sm:px-6 py-6 text-center sm:text-left flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500 border-t border-slate-200 mt-8">
+    <div>
+      <strong class="text-slate-700">AgroCycle AI</strong> • Apoio simples para decisões no campo. Sempre valide com um agrônomo local.
+    </div>
+    <button type="button" onclick="toggleExperienceModeQuick()" class="font-bold text-emerald-700 hover:underline cursor-pointer">
+      Alternar entre Modo Produtor e Modo Técnico
+    </button>
+  </footer>
+
+  <!-- MODAL: COMPARAR OUTRAS OPÇÕES DE PLANO -->
+  <div id="compare-plans-modal" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 my-8 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+        <div>
+          <span class="text-[11px] font-extrabold uppercase text-emerald-700">Escolha o plano que preferir</span>
+          <h3 class="text-lg font-extrabold text-slate-900">Comparar as 3 Opções de Plantio</h3>
+        </div>
+        <button onclick="toggleComparePlansModal()" class="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <div id="modal-plans-list" class="grid grid-cols-1 md:grid-cols-3 gap-3.5"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: RELATÓRIO WHATSAPP / PDF -->
+  <div id="report-modal" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 my-8">
+      <div class="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+        <div>
+          <span class="text-[11px] font-extrabold uppercase text-emerald-700">Pronto para compartilhar</span>
+          <h3 class="text-lg font-extrabold text-slate-900">Resumo do Seu Plano de Safra</h3>
+        </div>
+        <button onclick="closeReportModal()" class="no-print p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div id="report-content" class="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-xs font-mono text-slate-800 whitespace-pre-wrap max-h-80 overflow-y-auto leading-relaxed"></div>
+
+      <div class="no-print flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
+        <button onclick="copyReportToClipboard()" class="inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-extrabold shadow cursor-pointer">
+          <i data-lucide="copy" class="w-4 h-4"></i> Copiar para WhatsApp
+        </button>
+        <div class="flex items-center gap-2">
+          <button onclick="window.print()" class="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer">
+            <i data-lucide="printer" class="w-4 h-4"></i> Salvar PDF
+          </button>
+          <button onclick="closeReportModal()" class="px-4 py-3 rounded-2xl border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-bold cursor-pointer">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: TRADUTOR & METODOLOGIA (MODO TÉCNICO) -->
+  <div id="translator-modal" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 id="trans-title" class="text-base font-extrabold text-slate-900">Indicador</h3>
+        <button onclick="closeTranslatorModal()" class="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div id="trans-body" class="text-xs sm:text-sm text-slate-700 space-y-2 leading-relaxed"></div>
+    </div>
+  </div>
+
+  <div id="science-modal" class="fixed inset-0 z-50 hidden bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 my-8">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="text-base font-extrabold text-slate-900">Metodologia Científica & Fontes Orbitais</h3>
+        <button onclick="closeScienceModal()" class="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="text-xs text-slate-700 space-y-2 leading-relaxed">
+        <p><strong>Climatologia:</strong> NASA POWER API (T2M, T2M_MIN, PRECTOTCORR, ALLSKY_SFC_SW_DWN).</p>
+        <p><strong>Vegetação:</strong> Microsoft Planetary Computer STAC (Sentinel-2 L2A, NDVI = (B08 - B04)/(B08 + B04)).</p>
+        <p><strong>Balanço Hídrico & Quebra de Safra:</strong> FAO-56 (Hargreaves-Samani), FAO-33 (fator Ky) e classificação de solo ZARC (Tipos 1, 2 e 3).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- JAVASCRIPT ENGINE                                                     -->
+  <!-- ===================================================================== -->
+  <script>
+    const PRESETS = {
+      campo_mourao: {
+        name: "Campo Mourão - PR",
+        lat: -24.0458, lon: -52.3831, zoom: 14,
+        soil: "argiloso", crop: "soja", irrigation: "sequeiro",
+        smapMoisture: 21.4, smapDelta: -14, ndviPeak: 0.78, ndviOff: 0.24, bareSoilDays: 68,
+        fallbackTemp: 22.8, fallbackTmin: 11.2, fallbackRain: 1480, fallbackSolar: 18.4, confidence: 89,
+        polygon: [[-24.0420, -52.3880], [-24.0420, -52.3780], [-24.0495, -52.3780], [-24.0495, -52.3880]],
+        history: {
+          2021: { smap: 24.5, ndvi: 0.62, bare: 54 },
+          2022: { smap: 18.2, ndvi: 0.51, bare: 82 },
+          2023: { smap: 23.8, ndvi: 0.64, bare: 58 },
+          2024: { smap: 19.5, ndvi: 0.55, bare: 76 },
+          2025: { smap: 20.8, ndvi: 0.58, bare: 71 },
+          2026: { smap: 21.4, ndvi: 0.59, bare: 68 }
+        }
+      },
+      sorriso: {
+        name: "Sorriso - MT",
+        lat: -12.5425, lon: -55.7211, zoom: 14,
+        soil: "franco", crop: "soja", irrigation: "sequeiro",
+        smapMoisture: 19.1, smapDelta: -19, ndviPeak: 0.82, ndviOff: 0.19, bareSoilDays: 94,
+        fallbackTemp: 25.9, fallbackTmin: 19.4, fallbackRain: 1920, fallbackSolar: 20.1, confidence: 92,
+        polygon: [[-12.5380, -55.7270], [-12.5380, -55.7150], [-12.5470, -55.7150], [-12.5470, -55.7270]],
+        history: {
+          2021: { smap: 22.1, ndvi: 0.66, bare: 80 },
+          2022: { smap: 20.4, ndvi: 0.63, bare: 88 },
+          2023: { smap: 18.0, ndvi: 0.57, bare: 102 },
+          2024: { smap: 19.8, ndvi: 0.61, bare: 91 },
+          2025: { smap: 18.9, ndvi: 0.59, bare: 96 },
+          2026: { smap: 19.1, ndvi: 0.60, bare: 94 }
+        }
+      },
+      rio_verde: {
+        name: "Rio Verde - GO",
+        lat: -17.7923, lon: -50.9192, zoom: 14,
+        soil: "argiloso", crop: "soja", irrigation: "sequeiro",
+        smapMoisture: 20.2, smapDelta: -16, ndviPeak: 0.79, ndviOff: 0.21, bareSoilDays: 85,
+        fallbackTemp: 24.1, fallbackTmin: 15.8, fallbackRain: 1610, fallbackSolar: 19.5, confidence: 90,
+        polygon: [[-17.7885, -50.9245], [-17.7885, -50.9140], [-17.7960, -50.9140], [-17.7960, -50.9245]],
+        history: {
+          2021: { smap: 23.0, ndvi: 0.65, bare: 72 },
+          2022: { smap: 19.1, ndvi: 0.58, bare: 90 },
+          2023: { smap: 21.0, ndvi: 0.61, bare: 81 },
+          2024: { smap: 19.7, ndvi: 0.59, bare: 87 },
+          2025: { smap: 20.0, ndvi: 0.60, bare: 86 },
+          2026: { smap: 20.2, ndvi: 0.60, bare: 85 }
+        }
+      },
+      petrolina: {
+        name: "Petrolina - PE",
+        lat: -9.3891, lon: -40.5027, zoom: 14,
+        soil: "arenoso", crop: "milho", irrigation: "irrigado",
+        smapMoisture: 13.5, smapDelta: -26, ndviPeak: 0.68, ndviOff: 0.16, bareSoilDays: 125,
+        fallbackTemp: 27.4, fallbackTmin: 20.8, fallbackRain: 540, fallbackSolar: 22.3, confidence: 86,
+        polygon: [[-9.3855, -40.5075], [-9.3855, -40.4980], [-9.3925, -40.4980], [-9.3925, -40.5075]],
+        history: {
+          2021: { smap: 15.2, ndvi: 0.52, bare: 112 },
+          2022: { smap: 14.8, ndvi: 0.50, bare: 118 },
+          2023: { smap: 12.1, ndvi: 0.44, bare: 138 },
+          2024: { smap: 13.9, ndvi: 0.48, bare: 122 },
+          2025: { smap: 13.1, ndvi: 0.46, bare: 129 },
+          2026: { smap: 13.5, ndvi: 0.47, bare: 125 }
+        }
+      }
+    };
+
+    let state = {
+      regionKey: 'campo_mourao',
+      lat: PRESETS.campo_mourao.lat,
+      lon: PRESETS.campo_mourao.lon,
+      areaHa: 84.5,
+      areaUnit: 'ha',
+      currentPolygon: PRESETS.campo_mourao.polygon,
+      nasaTemp: PRESETS.campo_mourao.fallbackTemp,
+      nasaTmin: PRESETS.campo_mourao.fallbackTmin,
+      nasaRain: PRESETS.campo_mourao.fallbackRain,
+      nasaSolar: PRESETS.campo_mourao.fallbackSolar,
+      nasaLive: false,
+      stacLive: false,
+      stacItemId: null,
+      stacCollection: 'sentinel-2-l2a',
+      stacBbox: null,
+      stacDate: null,
+      stacCloudCover: null,
+      ndviCurrent: PRESETS.campo_mourao.history[2026].ndvi,
+      confidence: PRESETS.campo_mourao.confidence,
+      ndviLayerEnabled: true,
+      ndviOpacity: 0.75,
+      selectedScenarioId: 'pragmatico',
+      recommendedScenarioId: 'pragmatico',
+      selectedRiskType: 'normal',
+      scenarios: [],
+      selectedYear: 2026,
+      isCustomLocation: false,
+      locationLabel: PRESETS.campo_mourao.name,
+      lastResilience: { pragmatico: 91, financeiro: 72, blindagem: 96 },
+      stacNoScene: false,
+      agroShield: null
+    };
+
+    let experienceMode = 'produtor';
+    let wizardStep = 1;
+    let map, fieldPolygon, ndviTileLayer = null, ndviOfflineOverlay = null;
+    let drawMode = false, tempVertices = [], tempMarkers = [];
+    let historicalChart = null, radarChart = null;
+
+    // =========================================================================
+    // AREA UNIT CONVERSION (HECTARES <-> ALQUEIRES)
+    // =========================================================================
+    function formatArea(haValue) {
+      const unit = document.getElementById('area-unit-select')?.value || 'ha';
+      if (unit === 'alq_sp') {
+        return `${(haValue / 2.42).toFixed(1).replace('.', ',')} alq. paulista`;
+      }
+      if (unit === 'alq_mg') {
+        return `${(haValue / 4.84).toFixed(1).replace('.', ',')} alq. mineiro`;
+      }
+      return `${haValue.toFixed(1).replace('.', ',')} ha`;
+    }
+
+    function updateAreaDisplay() {
+      const formatted = formatArea(state.areaHa);
+      document.getElementById('polygon-area').textContent = formatted;
+      const sumEl = document.getElementById('summary-area-text');
+      if (sumEl) sumEl.textContent = formatted;
+      if (state.scenarios.length) {
+        renderSimpleDecisionCard();
+        updateLossAndFuturesUI();
+      }
+    }
+
+    // =========================================================================
+    // MAP & SATELLITE LAYERS
+    // =========================================================================
+    function initMap() {
+      const preset = PRESETS[state.regionKey];
+      map = L.map('map', { zoomControl: true }).setView([preset.lat, preset.lon], preset.zoom);
+
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Esri World Imagery',
+        maxZoom: 19
+      }).addTo(map);
+
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        opacity: 0.65
+      }).addTo(map);
+
+      drawFieldPolygon(preset.polygon);
+
+      map.on('click', function(e) {
+        if (drawMode) {
+          tempVertices.push([e.latlng.lat, e.latlng.lng]);
+          const marker = L.circleMarker(e.latlng, {
+            radius: 6, color: '#fbbf24', fillColor: '#059669', fillOpacity: 1, weight: 2
+          }).addTo(map);
+          tempMarkers.push(marker);
+          document.getElementById('vertex-count').textContent = `${tempVertices.length} pontos`;
+
+          if (tempVertices.length >= 2) {
+            if (fieldPolygon) map.removeLayer(fieldPolygon);
+            fieldPolygon = L.polygon(tempVertices, {
+              color: '#fbbf24', fillColor: '#10b981', fillOpacity: 0.25, weight: 2.5, dashArray: '5, 5'
+            }).addTo(map);
+          }
+        } else {
+          const lat = e.latlng.lat;
+          const lon = e.latlng.lng;
+          const delta = 0.0038;
+          const newPoly = [
+            [lat + delta, lon - delta],
+            [lat + delta, lon + delta],
+            [lat - delta, lon + delta],
+            [lat - delta, lon - delta]
+          ];
+          drawFieldPolygon(newPoly);
+          updateCoordinatesAndFetchOrbital(lat, lon, newPoly, "Local marcado no mapa");
+          showToast("Local atualizado! Analisando terra e clima...", "emerald");
+        }
+      });
+    }
+
+    function drawFieldPolygon(latlngs) {
+      state.currentPolygon = latlngs;
+      if (fieldPolygon) map.removeLayer(fieldPolygon);
+      fieldPolygon = L.polygon(latlngs, {
+        color: '#10b981',
+        fillColor: '#059669',
+        fillOpacity: state.ndviLayerEnabled ? 0.08 : 0.28,
+        weight: 3
+      }).addTo(map);
+
+      state.areaHa = calculatePolygonAreaHa(latlngs);
+      updateAreaDisplay();
+    }
+
+    function calculatePolygonAreaHa(latlngs) {
+      if (!latlngs || latlngs.length < 3) return 50.0;
+      const earthRadius = 6378137;
+      let area = 0;
+      for (let i = 0; i < latlngs.length; i++) {
+        const p1 = latlngs[i];
+        const p2 = latlngs[(i + 1) % latlngs.length];
+        const lat1 = p1[0] * Math.PI / 180;
+        const lat2 = p2[0] * Math.PI / 180;
+        const dLon = (p2[1] - p1[1]) * Math.PI / 180;
+        area += dLon * (2 + Math.sin(lat1) + Math.sin(lat2));
+      }
+      area = Math.abs(area * earthRadius * earthRadius / 2.0);
+      return Math.max(1.0, Math.min(25000, area / 10000.0));
+    }
+
+    function toggleAdvancedMapTools() {
+      document.getElementById('advanced-map-tools').classList.toggle('hidden');
+    }
+
+    function toggleDrawMode() {
+      drawMode = !drawMode;
+      const btn = document.getElementById('btn-draw-poly');
+      const finishBtn = document.getElementById('btn-finish-poly');
+      const instr = document.getElementById('draw-instruction');
+
+      if (drawMode) {
+        tempVertices = [];
+        tempMarkers.forEach(m => map.removeLayer(m));
+        tempMarkers = [];
+        if (fieldPolygon) map.removeLayer(fieldPolygon);
+        clearNdviMapLayers();
+        btn.classList.add('hidden');
+        finishBtn.classList.remove('hidden');
+        instr.classList.remove('hidden');
+        document.getElementById('vertex-count').textContent = '0 pontos';
+      } else {
+        btn.classList.remove('hidden');
+        finishBtn.classList.add('hidden');
+        instr.classList.add('hidden');
+      }
+    }
+
+    function finishPolygon() {
+      if (tempVertices.length < 3) {
+        showToast("Toque em pelo menos 3 cantos no mapa antes de fechar.", "amber");
+        return;
+      }
+      tempMarkers.forEach(m => map.removeLayer(m));
+      tempMarkers = [];
+      drawFieldPolygon(tempVertices);
+
+      let sumLat = 0, sumLon = 0;
+      tempVertices.forEach(v => { sumLat += v[0]; sumLon += v[1]; });
+      drawMode = false;
+      document.getElementById('btn-draw-poly').classList.remove('hidden');
+      document.getElementById('btn-finish-poly').classList.add('hidden');
+      document.getElementById('draw-instruction').classList.add('hidden');
+
+      updateCoordinatesAndFetchOrbital(sumLat / tempVertices.length, sumLon / tempVertices.length, tempVertices, "Área Desenhada");
+      showToast(`Área marcada (${formatArea(state.areaHa)})!`, "emerald");
+    }
+
+    function resetPolygonToPreset() {
+      if (drawMode) toggleDrawMode();
+      selectPresetRegion(state.regionKey);
+    }
+
+    function clearNdviMapLayers() {
+      if (ndviTileLayer && map && map.hasLayer(ndviTileLayer)) map.removeLayer(ndviTileLayer);
+      if (ndviOfflineOverlay && map && map.hasLayer(ndviOfflineOverlay)) map.removeLayer(ndviOfflineOverlay);
+    }
+
+    function renderNdviMapLayer() {
+      if (!map) return;
+      clearNdviMapLayers();
+      const modeBadge = document.getElementById('ndvi-layer-mode-badge');
+
+      if (!state.ndviLayerEnabled) {
+        if (fieldPolygon) fieldPolygon.setStyle({ fillOpacity: 0.28 });
+        if (modeBadge) modeBadge.textContent = "Oculta";
+        return;
+      }
+      if (fieldPolygon) fieldPolygon.setStyle({ fillOpacity: 0.08 });
+
+      if (state.stacLive && state.stacItemId) {
+        const tileUrl = `https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/WebMercatorQuad/{z}/{x}/{y}@1x?collection=${encodeURIComponent(state.stacCollection)}&item=${encodeURIComponent(state.stacItemId)}&assets=B08&assets=B04&expression=(B08-B04)/(B08%2BB04)&asset_as_band=true&rescale=-0.1,0.85&colormap_name=rdylgn`;
+        const tileBounds = state.stacBbox
+          ? L.latLngBounds([state.stacBbox[1], state.stacBbox[0]], [state.stacBbox[3], state.stacBbox[2]])
+          : (state.currentPolygon && state.currentPolygon.length >= 3 ? L.polygon(state.currentPolygon).getBounds() : null);
+        let errHandled = false;
+        ndviTileLayer = L.tileLayer(tileUrl, {
+          opacity: state.ndviOpacity,
+          minZoom: 8,
+          maxZoom: 19,
+          crossOrigin: true,
+          ...(tileBounds ? { bounds: tileBounds } : {})
+        });
+        ndviTileLayer.on('tileerror', () => { if (!errHandled) { errHandled = true; renderOfflineNdviOverlay(); } });
+        ndviTileLayer.addTo(map);
+        if (modeBadge) modeBadge.textContent = `Satélite Ao Vivo (${state.stacDate})`;
+      } else {
+        renderOfflineNdviOverlay();
+      }
+    }
+
+    function renderOfflineNdviOverlay() {
+      if (!map || !state.ndviLayerEnabled || !state.currentPolygon || state.currentPolygon.length < 3) return;
+      clearNdviMapLayers();
+      const bounds = L.polygon(state.currentPolygon).getBounds();
+      const canvas = document.createElement('canvas');
+      canvas.width = 96; canvas.height = 96;
+      const ctx = canvas.getContext('2d');
+      const baseNdvi = state.ndviCurrent || 0.55;
+      const imgData = ctx.createImageData(96, 96);
+
+      for (let y = 0; y < 96; y++) {
+        for (let x = 0; x < 96; x++) {
+          const wave = Math.sin((x / 96) * 6) * Math.cos((y / 96) * 5) * 0.14;
+          const v = Math.max(0.05, Math.min(0.90, baseNdvi + wave));
+          let r, g, b;
+          if (v < 0.28) { r = 220; g = 110; b = 38; }
+          else if (v < 0.55) { r = 200; g = 185; b = 35; }
+          else { r = 28; g = 165; b = 75; }
+          const idx = (y * 96 + x) * 4;
+          imgData.data[idx] = r; imgData.data[idx + 1] = g; imgData.data[idx + 2] = b; imgData.data[idx + 3] = 200;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+      ndviOfflineOverlay = L.imageOverlay(canvas.toDataURL(), bounds, { opacity: state.ndviOpacity }).addTo(map);
+      const modeBadge = document.getElementById('ndvi-layer-mode-badge');
+      if (modeBadge) modeBadge.textContent = "Mapa Calibrado";
+    }
+
+    function toggleNdviLayer(enabled) {
+      state.ndviLayerEnabled = enabled;
+      renderNdviMapLayer();
+    }
+
+    function updateNdviOpacity(val) {
+      state.ndviOpacity = Number(val);
+      document.getElementById('ndvi-opacity-val').textContent = `${Math.round(state.ndviOpacity * 100)}%`;
+      if (ndviTileLayer && map.hasLayer(ndviTileLayer)) ndviTileLayer.setOpacity(state.ndviOpacity);
+      if (ndviOfflineOverlay && map.hasLayer(ndviOfflineOverlay)) ndviOfflineOverlay.setOpacity(state.ndviOpacity);
+    }
+
+    // =========================================================================
+    // NASA POWER & STAC ORBITAL FETCHING
+    // =========================================================================
+    function polygonToGeoJsonRing(latlngs) {
+      const ring = latlngs.map(pt => [Number(pt[1].toFixed(6)), Number(pt[0].toFixed(6))]);
+      if (ring.length > 0 && (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])) {
+        ring.push([ring[0][0], ring[0][1]]);
+      }
+      return ring;
+    }
+
+    async function fetchPlanetaryComputerNDVI(polygonLatLngs) {
+      const stacBadge = document.getElementById('status-stac');
+      const preset = PRESETS[state.regionKey];
+      const geojsonPoly = { type: "Polygon", coordinates: [polygonToGeoJsonRing(polygonLatLngs)] };
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(endDate.getDate() - 180);
+      const dtRange = `${startDate.toISOString().split('T')[0]}T00:00:00Z/${endDate.toISOString().split('T')[0]}T23:59:59Z`;
+
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 7500);
+        const res = await fetch('https://planetarycomputer.microsoft.com/api/stac/v1/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: ctrl.signal,
+          body: JSON.stringify({
+            collections: ['sentinel-2-l2a'],
+            intersects: geojsonPoly,
+            datetime: dtRange,
+            query: { 'eo:cloud_cover': { lt: 45 } },
+            limit: 3,
+            sortby: [{ field: 'properties.datetime', direction: 'desc' }]
+          })
+        });
+        clearTimeout(tid);
+        if (!res.ok) throw new Error('STAC error');
+        const data = await res.json();
+
+        if (!data.features || data.features.length === 0) {
+          state.stacLive = false;
+          state.stacNoScene = true;
+          state.stacItemId = null;
+          state.stacBbox = null;
+          state.ndviCurrent = estimateClimateNdvi(state.nasaRain, state.nasaTemp);
+          if (stacBadge) stacBadge.textContent = "STAC: Sem cena terrestre";
+        } else {
+          const feat = data.features[0];
+          state.stacLive = true;
+          state.stacNoScene = false;
+          state.stacItemId = feat.id;
+          state.stacCollection = feat.collection || 'sentinel-2-l2a';
+          state.stacBbox = Array.isArray(feat.bbox) && feat.bbox.length >= 4 ? feat.bbox : null;
+          state.stacDate = (feat.properties.datetime || '').split('T')[0];
+          state.stacCloudCover = Number((feat.properties['eo:cloud_cover'] ?? 10).toFixed(1));
+
+          // CORREÇÃO 1: Buscar a estatística zonal real de NDVI dentro do polígono
+          try {
+            const statsCtrl = new AbortController();
+            const statsTid = setTimeout(() => statsCtrl.abort(), 7000);
+            const statsUrl = `https://planetarycomputer.microsoft.com/api/data/v1/item/statistics?collection=${encodeURIComponent(state.stacCollection)}&item=${encodeURIComponent(state.stacItemId)}&assets=B08&assets=B04&expression=(B08-B04)/(B08%2BB04)&asset_as_band=true`;
+            const statsRes = await fetch(statsUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              signal: statsCtrl.signal,
+              body: JSON.stringify({ type: 'Feature', properties: {}, geometry: geojsonPoly })
+            });
+            clearTimeout(statsTid);
+
+            if (statsRes.ok) {
+              const statsJson = await statsRes.json();
+              const firstKey = Object.keys(statsJson)[0];
+              const bandStats = statsJson[firstKey] || statsJson;
+              if (bandStats && typeof bandStats.mean === 'number' && !isNaN(bandStats.mean)) {
+                state.ndviCurrent = Number(Math.max(-0.1, Math.min(0.95, bandStats.mean)).toFixed(2));
+              }
+            }
+          } catch (statsErr) {
+            state.ndviCurrent = state.isCustomLocation
+              ? estimateClimateNdvi(state.nasaRain, state.nasaTemp)
+              : (preset.history[state.selectedYear]?.ndvi ?? preset.ndviOff);
+          }
+
+          if (stacBadge) stacBadge.textContent = `STAC Sentinel-2: Online (${state.stacDate})`;
+        }
+      } catch (e) {
+        state.stacLive = false;
+        state.stacNoScene = false;
+        state.ndviCurrent = state.isCustomLocation
+          ? estimateClimateNdvi(state.nasaRain, state.nasaTemp)
+          : (preset.history[state.selectedYear]?.ndvi ?? preset.ndviOff);
+        if (stacBadge) stacBadge.textContent = "STAC: Cache Regional";
+      }
+
+      renderNdviMapLayer();
+      updateDiagnosticUI();
+      runSimulation();
+    }
+
+    async function fetchNasaPowerClimatology(lat, lon) {
+      const statusBadge = document.getElementById('status-nasa-power');
+      const url = `https://power.larc.nasa.gov/api/temporal/climatology/point?parameters=T2M,T2M_MIN,PRECTOTCORR,ALLSKY_SFC_SW_DWN&community=AG&longitude=${lon.toFixed(4)}&latitude=${lat.toFixed(4)}&format=JSON`;
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 6500);
+        const res = await fetch(url, { signal: ctrl.signal });
+        clearTimeout(tid);
+        if (!res.ok) throw new Error("NASA HTTP");
+        const data = await res.json();
+        const params = data.properties.parameter;
+        const tempAnn = Number(params.T2M?.ANN);
+        const tminMonthly = params.T2M_MIN ? Object.entries(params.T2M_MIN).filter(([k]) => k !== 'ANN').map(([, v]) => Number(v)) : [];
+        const rainDaily = Number(params.PRECTOTCORR?.ANN);
+        const solarAnn = Number(params.ALLSKY_SFC_SW_DWN?.ANN);
+
+        if (!isNaN(tempAnn) && tempAnn > -50) {
+          state.nasaTemp = Number(tempAnn.toFixed(1));
+          state.nasaTmin = tminMonthly.length ? Number(Math.min(...tminMonthly).toFixed(1)) : Number((tempAnn - 10.5).toFixed(1));
+          state.nasaRain = Math.round(rainDaily * 365);
+          state.nasaSolar = Number(solarAnn.toFixed(1));
+          state.nasaLive = true;
+          if (statusBadge) statusBadge.textContent = "NASA POWER: Online";
+        } else {
+          throw new Error("Invalid values");
+        }
+      } catch (e) {
+        // CORREÇÃO 2: Ajustar temperatura estimada pela latitude se estiver offline
+        const preset = PRESETS[state.regionKey];
+        const latShift = lat - preset.lat;
+        state.nasaTemp = Number((preset.fallbackTemp + latShift * 0.35).toFixed(1));
+        state.nasaTmin = Number((preset.fallbackTmin + latShift * 0.45).toFixed(1));
+        state.nasaRain = preset.fallbackRain;
+        state.nasaSolar = preset.fallbackSolar;
+        state.nasaLive = false;
+        if (statusBadge) statusBadge.textContent = "NASA POWER: Cache Regional";
+      }
+      updateDiagnosticUI();
+      runSimulation();
+    }
+
+    function selectPresetRegion(key) {
+      state.regionKey = key;
+      state.isCustomLocation = false;
+      const preset = PRESETS[key];
+      state.locationLabel = preset.name;
+      state.lat = preset.lat;
+      state.lon = preset.lon;
+      state.nasaTemp = preset.fallbackTemp;
+      state.nasaTmin = preset.fallbackTmin;
+      state.nasaRain = preset.fallbackRain;
+      state.nasaSolar = preset.fallbackSolar;
+      state.stacLive = false;
+      state.ndviCurrent = preset.history[state.selectedYear]?.ndvi ?? preset.ndviOff;
+
+      document.getElementById('input-soil').value = preset.soil;
+      document.getElementById('input-crop').value = preset.crop;
+      document.getElementById('input-irrigation').value = preset.irrigation;
+      syncVisualButtonsFromSelects();
+
+      if (map) {
+        map.setView([preset.lat, preset.lon], preset.zoom);
+        drawFieldPolygon(preset.polygon);
+      }
+      updateDiagnosticUI();
+      updateHistoricalChart();
+      runSimulation();
+      updateCoordinatesAndFetchOrbital(preset.lat, preset.lon, preset.polygon, preset.name, false);
+    }
+
+    function setSatellitesLoadingState() {
+      const waterStatus = document.getElementById('fg-water-status');
+      const ndviStatus = document.getElementById('fg-ndvi-status');
+      const ndviPill = document.getElementById('fg-ndvi-pill');
+      if (waterStatus) waterStatus.textContent = "Calculando umidade...";
+      if (ndviStatus) ndviStatus.textContent = "Lendo imagem de satélite...";
+      if (ndviPill) {
+        ndviPill.textContent = "Buscando...";
+        ndviPill.className = "px-2.5 py-1 rounded-full text-xs font-extrabold bg-slate-200 text-slate-700 animate-pulse";
+      }
+    }
+
+    function updateCoordinatesAndFetchOrbital(lat, lon, polygonLatLngs, label, isCustom = true) {
+      state.lat = lat;
+      state.lon = lon;
+      state.isCustomLocation = isCustom;
+      state.locationLabel = label;
+      document.getElementById('coords-display').textContent = `Lat: ${lat.toFixed(4)}° | Lon: ${lon.toFixed(4)}°`;
+      if (isCustom) setSatellitesLoadingState();
+      fetchNasaPowerClimatology(lat, lon);
+      fetchPlanetaryComputerNDVI(polygonLatLngs || state.currentPolygon);
+      updateHistoricalChart();
+    }
+
+    function estimateClimateNdvi(rainMm, tempC) {
+      if (tempC < 0) return 0.12;
+      const aridity = rainMm / Math.max(150, (tempC + 10) * 45);
+      return Number(Math.max(0.10, Math.min(0.82, 0.14 + aridity * 0.48)).toFixed(2));
+    }
+
+    // =========================================================================
+    // BIOPHYSICAL & AGRO SHIELD CALCULATIONS
+    // =========================================================================
+    function computeEt0HargreavesSamani(tempC, solarMjM2Day) {
+      return Number(Math.max(1.0, 0.0135 * (tempC + 17.78) * (solarMjM2Day / 2.45)).toFixed(2));
+    }
+
+    function computeWaterBalance(rainMmYear, et0MmDay) {
+      return Math.round(rainMmYear - (et0MmDay * 365.0));
+    }
+
+    function getEffectiveOrbitalMetrics() {
+      const preset = PRESETS[state.regionKey];
+      const yrData = preset.history[state.selectedYear] || preset.history[2026];
+      const et0 = computeEt0HargreavesSamani(state.nasaTemp, state.nasaSolar);
+      const waterBalance = computeWaterBalance(state.nasaRain, et0);
+
+      if (!state.isCustomLocation) {
+        return { smapMoisture: yrData.smap, smapDelta: preset.smapDelta, bareSoilDays: yrData.bare, et0, waterBalance };
+      }
+      const soilType = document.getElementById('input-soil')?.value || 'argiloso';
+      const textureBonus = soilType === 'argiloso' ? 3.2 : (soilType === 'franco' ? 1.2 : -2.5);
+      const normalizedBh = Math.max(-1.0, Math.min(1.0, waterBalance / 1200));
+      const dynamicSmap = Number(Math.max(6.5, Math.min(34.0, 20.5 + normalizedBh * 9.5 + textureBonus)).toFixed(1));
+      return {
+        smapMoisture: dynamicSmap,
+        smapDelta: Math.round(normalizedBh * 22),
+        bareSoilDays: Math.round(Math.max(15, Math.min(220, 95 - (state.ndviCurrent * 85) - normalizedBh * 30))),
+        et0,
+        waterBalance
+      };
+    }
+
+    function classifySoilZarc(soilKey) {
+      if (soilKey === 'argiloso') return { tipo: 'Argiloso', zarcCode: 'Tipo 3 (Argiloso)', ad: 0.15 };
+      if (soilKey === 'arenoso') return { tipo: 'Arenoso', zarcCode: 'Tipo 1 (Arenoso)', ad: 0.07 };
+      return { tipo: 'Médio', zarcCode: 'Tipo 2 (Médio)', ad: 0.11 };
+    }
+
+    function obterParametrosCulturaAgroShield(cultura, dap) {
+      const c = (cultura || 'soja').toLowerCase();
+      let kc = 0.6, raiz = Math.min(5.0 + 0.6 * dap, 50.0);
+      if (c === 'soja') { kc = dap <= 20 ? 0.40 : (dap <= 50 ? 0.80 : (dap <= 90 ? 1.15 : 0.50)); raiz = Math.min(5.0 + 0.8 * dap, 60.0); }
+      else if (c === 'milho') { kc = dap <= 20 ? 0.30 : (dap <= 50 ? 0.75 : (dap <= 90 ? 1.20 : 0.50)); raiz = Math.min(5.0 + 1.0 * dap, 80.0); }
+      else if (c === 'feijao') { kc = dap <= 15 ? 0.40 : (dap <= 35 ? 0.80 : (dap <= 65 ? 1.15 : 0.45)); raiz = Math.min(5.0 + 0.7 * dap, 45.0); }
+      else if (c === 'mandioca') { kc = dap <= 30 ? 0.35 : (dap <= 90 ? 0.85 : 0.90); raiz = Math.min(5.0 + 0.9 * dap, 90.0); }
+      else if (c === 'algodao') { kc = dap <= 25 ? 0.35 : (dap <= 65 ? 0.80 : (dap <= 110 ? 1.15 : 0.60)); raiz = Math.min(5.0 + 0.9 * dap, 85.0); }
+      else if (c === 'trigo') { kc = dap <= 20 ? 0.35 : (dap <= 50 ? 0.75 : (dap <= 85 ? 1.15 : 0.40)); raiz = Math.min(5.0 + 0.8 * dap, 65.0); }
+      return { kc, zCm: Math.max(5.0, raiz) };
+    }
+
+    function computeAgroShieldDecision(p, eff) {
+      const zarc = classifySoilZarc(p.soil);
+      const dap = Number(p.dap ?? 20);
+      const rainDeltaPct = Number(document.getElementById('stress-rain')?.value || 0);
+      const tempDelta = Number(document.getElementById('stress-temp')?.value || 0);
+      const baseEto = Math.max(1.8, 0.0135 * (state.nasaTemp + tempDelta + 17.78) * (state.nasaSolar / 2.45));
+      const dailyRainAvg = Math.max(0.2, (state.nasaRain / 365) * (1 + rainDeltaPct / 100));
+
+      const { kc: kc0, zCm: z0 } = obterParametrosCulturaAgroShield(p.crop, dap);
+      const cad0 = zarc.ad * z0 * 10.0;
+      const smapSatFraction = Math.max(0.18, Math.min(0.95, (eff.smapMoisture - 8) / 28));
+      let arm = Math.max(0, Math.min(cad0, smapSatFraction * cad0));
+      if (p.irrigation === 'irrigado') arm = Math.max(arm, 0.78 * cad0);
+
+      const armAtual = arm, cadAtual = cad0;
+      const statusAtual = armAtual <= 0.5 * cadAtual ? 'Seco' : 'Úmido';
+      let alertaIrrigacao = false, diasAteSeca = 14;
+
+      for (let d = 1; d <= 14; d++) {
+        const { kc, zCm } = obterParametrosCulturaAgroShield(p.crop, dap + d);
+        const cadDiaria = zarc.ad * zCm * 10.0;
+        const etc = baseEto * kc;
+        const chuvaDia = rainDeltaPct <= -15 ? dailyRainAvg * 0.35 : (d % 4 === 0 ? dailyRainAvg * 2.2 : dailyRainAvg * 0.45);
+        let armCalc = Math.max(0, Math.min(cadDiaria, arm + chuvaDia - etc));
+        const satArm = smapSatFraction * cadDiaria;
+        if (Math.abs(armCalc - satArm) > 0.2 * cadDiaria) armCalc = armCalc * 0.7 + satArm * 0.3;
+        arm = armCalc;
+        if (!alertaIrrigacao && arm <= 0.5 * cadDiaria) { alertaIrrigacao = true; diasAteSeca = d; }
+      }
+
+      const pctCad = Math.round((armAtual / Math.max(1, cadAtual)) * 100);
+      let mensagemStatus = 'Terra com boa umidade para os próximos 14 dias';
+      if (statusAtual === 'Seco') {
+        mensagemStatus = p.irrigation === 'irrigado'
+          ? 'Terra seca: hora de ligar a irrigação para não perder produção'
+          : 'Terra com pouca água: cubra o solo com palhada antes de plantar';
+      } else if (alertaIrrigacao) {
+        mensagemStatus = p.irrigation === 'irrigado'
+          ? `Atenção: programar irrigação em até ${diasAteSeca} dias`
+          : `Atenção: umidade segura por cerca de ${diasAteSeca} dias sem chuva`;
+      }
+
+      return {
+        zarcCode: zarc.zarcCode, ad: zarc.ad, dap, kc: kc0, zCm: Math.round(z0),
+        cadMm: Math.round(cadAtual * 10) / 10, armMm: Math.round(armAtual * 10) / 10,
+        pctCad, status: statusAtual, alertaIrrigacao, diasAteSeca, mensagemStatus
+      };
+    }
+
+    function computeFao33YieldPreservation(ky, rainDeltaPct, tempDeltaC, baseTempC, solarMjM2Day, mulchEsReduction, irrigated, frostActive, frostTolerance) {
+      let etaEtc;
+      if (irrigated) {
+        etaEtc = Math.max(0.75, Math.min(1.0, 0.98 - Math.max(0, tempDeltaC) * 0.015 + mulchEsReduction * 0.05));
+      } else {
+        const et0Base = computeEt0HargreavesSamani(baseTempC, solarMjM2Day);
+        const et0Stressed = computeEt0HargreavesSamani(baseTempC + tempDeltaC, solarMjM2Day);
+        const effectiveSupply = (1.0 + rainDeltaPct / 100.0) * (1.0 + mulchEsReduction * 0.38);
+        etaEtc = Math.max(0.35, Math.min(1.0, effectiveSupply * (et0Base / et0Stressed)));
+      }
+      let preserved = (1.0 - ky * (1.0 - etaEtc)) * 100;
+      if (frostActive) preserved -= (1 - frostTolerance) * 22;
+      return Math.round(Math.max(22, Math.min(99, preserved)));
+    }
+
+    function computeUreaSavingsBrl(nFixedKgHa) {
+      return Math.round(((nFixedKgHa * 0.50) / 0.45) * 3.20);
+    }
+
+    // =========================================================================
+    // UI UPDATES & SIMULATION
+    // =========================================================================
+    function updateDiagnosticUI() {
+      const eff = getEffectiveOrbitalMetrics();
+
+      document.getElementById('metric-solar').textContent = `${state.nasaSolar.toFixed(1)} MJ`;
+      document.getElementById('metric-et0').textContent = `${eff.et0.toFixed(2)} mm/d`;
+      document.getElementById('metric-bh').textContent = `${eff.waterBalance >= 0 ? '+' : ''}${eff.waterBalance} mm`;
+
+      // 1. Card: Água guardada na terra
+      const smapVal = eff.smapMoisture;
+      const smapPct = Math.max(10, Math.min(95, Math.round((smapVal / 32) * 100)));
+      document.getElementById('fg-water-bar').style.width = `${smapPct}%`;
+      document.getElementById('fg-water-bar').className = `h-full rounded-full transition-all duration-500 ${smapVal < 16 ? 'bg-rose-500' : (smapVal < 22 ? 'bg-amber-500' : 'bg-emerald-500')}`;
+      document.getElementById('fg-water-status').textContent = smapVal < 16
+        ? `Terra Seca (${smapVal}%)`
+        : (smapVal < 22 ? `Umidade Média (${smapVal}%)` : `Boa Umidade (${smapVal}%)`);
+      const wPill = document.getElementById('fg-water-pill');
+      wPill.textContent = smapVal < 16 ? 'Alerta' : (smapVal < 22 ? 'Atenção' : 'Ótimo');
+      wPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${smapVal < 16 ? 'bg-rose-200 text-rose-950' : (smapVal < 22 ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200 text-emerald-950')}`;
+
+      // 2. Card: Verde / Cobertura da roça (CORREÇÃO 3: tratar stacNoScene e cores da pill)
+      const ndviPct = Math.max(8, Math.min(98, Math.round(state.ndviCurrent * 100)));
+      const ndviBar = document.getElementById('fg-ndvi-bar');
+      ndviBar.style.width = `${ndviPct}%`;
+      ndviBar.className = `h-full rounded-full transition-all duration-500 ${state.ndviCurrent < 0.30 ? 'bg-rose-500' : (state.ndviCurrent < 0.50 ? 'bg-amber-500' : 'bg-emerald-500')}`;
+
+      document.getElementById('fg-ndvi-status').textContent = state.stacNoScene
+        ? `Sem leitura terrestre (${state.ndviCurrent.toFixed(2)})`
+        : (state.ndviCurrent < 0.30
+          ? `Terra Descoberta (${state.ndviCurrent.toFixed(2)})`
+          : (state.ndviCurrent < 0.55 ? `Verde Médio (${state.ndviCurrent.toFixed(2)})` : `Bem Verde (${state.ndviCurrent.toFixed(2)})`));
+
+      const ndviPill = document.getElementById('fg-ndvi-pill');
+      ndviPill.textContent = state.stacNoScene ? 'Água/Nuvem' : (state.ndviCurrent < 0.30 ? 'Exposta' : 'Saudável');
+      ndviPill.className = `px-2.5 py-1 rounded-full text-xs font-extrabold ${state.stacNoScene ? 'bg-slate-200 text-slate-800' : (state.ndviCurrent < 0.30 ? 'bg-amber-200/80 text-amber-950' : 'bg-emerald-200/80 text-emerald-950')}`;
+
+      // 3. Card: Clima da Região
+      document.getElementById('fg-temp').textContent = `${state.nasaTemp.toFixed(1)} °C`;
+      document.getElementById('fg-rain').textContent = `${state.nasaRain.toLocaleString('pt-BR')} mm`;
+
+      // Painel Técnico
+      document.getElementById('val-smap').textContent = `${smapVal}% vol (${eff.smapDelta > 0 ? '+' : ''}${eff.smapDelta}%)`;
+      document.getElementById('val-ndvi').textContent = state.stacLive && state.stacDate
+        ? `NDVI ${state.ndviCurrent.toFixed(2)} (${state.stacDate})`
+        : `NDVI ${state.ndviCurrent.toFixed(2)}`;
+      document.getElementById('bare-soil-text').textContent = `Janela histórica de solo descoberto: ${eff.bareSoilDays} dias/ano.`;
+    }
+
+    function getFarmProfile() {
+      return {
+        crop: document.getElementById('input-crop').value,
+        soil: document.getElementById('input-soil').value,
+        compaction: document.getElementById('input-compaction').value,
+        irrigation: document.getElementById('input-irrigation').value,
+        ph: Number(document.getElementById('input-ph').value),
+        mo: Number(document.getElementById('input-mo').value),
+        dap: Number(document.getElementById('input-dap').value),
+        machConv: document.getElementById('mach-conv').checked,
+        machMiudas: document.getElementById('mach-miudas').checked,
+        machColhedora: document.getElementById('mach-colhedora').checked,
+        machRolofaca: document.getElementById('mach-rolofaca').checked,
+        mktGraos: document.getElementById('mkt-graos').checked,
+        mktPecuaria: document.getElementById('mkt-pecuaria').checked,
+        mktCobertura: document.getElementById('mkt-cobertura').checked,
+        soilWeight: Number(document.getElementById('prio-soil-vs-cash').value) / 100,
+        waterWeight: Number(document.getElementById('prio-water').value) / 100,
+        pestWeight: Number(document.getElementById('prio-pest').value) / 100
+      };
+    }
+
+    function runSimulation() {
+      const p = getFarmProfile();
+      const eff = getEffectiveOrbitalMetrics();
+      const isDry = (p.irrigation === 'sequeiro' && (state.nasaRain < 1200 || eff.smapMoisture < 20));
+      const isAcidic = p.ph < 5.2;
+      const isLowMO = p.mo < 2.0;
+      const shield = computeAgroShieldDecision(p, eff);
+      state.agroShield = shield;
+
+      const summerMap = {
+        soja: 'Soja Precoce (Ciclo 115d)',
+        milho: 'Milho Verão + Fixação de N',
+        feijao: 'Feijão-Comum / Caupi',
+        mandioca: 'Mandioca Consorciada com Feijão',
+        algodao: 'Algodão em Plantio Direto',
+        trigo: 'Soja Fixadora de N'
+      };
+      const summer1 = summerMap[p.crop] || 'Soja Fixadora de N';
+      const canSmall = p.machMiudas && p.mktCobertura;
+
+      const safrinhaPragmatic = canSmall
+        ? (isDry ? 'Sorgo Granífero + Braquiária' : 'Milho Safrinha + Braquiária Ruziziensis')
+        : (isDry ? 'Sorgo Granífero Solteiro' : 'Milho Safrinha + Feijão-Caupi');
+      const safrinhaCash = (p.irrigation === 'irrigado' || !isDry) ? 'Milho Safrinha Alta Tecnologia' : 'Sorgo Granífero';
+      const safrinhaShield = canSmall ? 'Crotalária Ochroleuca + Milheto' : 'Feijão-Guandu + Sorgo Forrageiro';
+
+      const winterPragmatic = canSmall
+        ? ((state.nasaTmin <= 9.5 || Math.abs(state.lat) >= 24.5) ? 'Aveia Preta + Braquiária' : 'Crotalária Spectabilis (Cobertura)')
+        : 'Aveia Preta (Palhada / Pastejo)';
+      const winterCash = p.mktGraos ? (state.nasaTemp < 24.5 ? 'Trigo Comercial / Cevada' : 'Feijão-Caupi / Gergelim') : 'Milheto para Pastejo';
+      const winterShield = canSmall ? 'Mix Cobertura (Nabo + Crotalária + Braquiária)' : 'Aveia Preta + Ervilhaca';
+
+      const nSaved1 = computeUreaSavingsBrl((canSmall ? 110 : 75) + (isLowMO ? 15 : 0));
+      const netMargin1 = Math.round(3850 + (p.irrigation === 'irrigado' ? 950 : 0) + (p.mo * 80));
+
+      const nSaved2 = computeUreaSavingsBrl(30);
+      const netMargin2 = Math.round(4290 + (p.irrigation === 'irrigado' ? 1200 : -280));
+
+      const nSaved3 = computeUreaSavingsBrl((canSmall ? 150 : 105) + (isLowMO ? 20 : 0));
+      const netMargin3 = Math.round(3320 + (p.mktPecuaria ? 520 : 0) + (p.mo * 90));
+
+      let recommendedId = 'pragmatico';
+      if (shield.status === 'Seco' || (shield.alertaIrrigacao && shield.diasAteSeca <= 4)) recommendedId = 'blindagem';
+      else if (p.soilWeight <= 0.30 && p.waterWeight <= 0.50) recommendedId = 'financeiro';
+      else if (p.soilWeight >= 0.80) recommendedId = 'blindagem';
+
+      state.recommendedScenarioId = recommendedId;
+      if (!state.userManuallyPickedScenario) state.selectedScenarioId = recommendedId;
+
+      state.scenarios = [
+        {
+          id: 'pragmatico',
+          badge: '⚖️ Equilíbrio (Lucro + Terra Forte)',
+          title: 'Plano Equilibrado (Recomendado)',
+          subtitle: 'Dá boa colheita e deixa palha na terra para segurar a umidade.',
+          cycles: [
+            { period: '1ª Safra • Verão', crop: summer1, role: 'Renda principal da propriedade' },
+            { period: '2ª Safra • Safrinha', crop: safrinhaPragmatic, role: 'Colheita extra + raiz que segura água' },
+            { period: '3ª Safra • Inverno', crop: winterPragmatic, role: 'Cobre a terra e economiza adubo' }
+          ],
+          ureaSaved: nSaved1,
+          projectedMarginValue: netMargin1,
+          plainExplain: 'Você colhe bem no verão e na safrinha e ainda protege a terra no inverno para gastar menos com ureia.',
+          scores: [86, 88, 84, 86, 85, 78, 80]
+        },
+        {
+          id: 'financeiro',
+          badge: '💰 Dinheiro Mais Rápido',
+          title: 'Plano Foco em Venda Rápida',
+          subtitle: 'Prioriza lavouras de venda imediata nas 3 épocas do ano.',
+          cycles: [
+            { period: '1ª Safra • Verão', crop: summer1, role: 'Venda rápida na cooperativa' },
+            { period: '2ª Safra • Safrinha', crop: safrinhaCash, role: 'Segunda colheita comercial' },
+            { period: '3ª Safra • Inverno', crop: winterCash, role: 'Terceira safra de venda (exige mais chuva)' }
+          ],
+          ureaSaved: nSaved2,
+          projectedMarginValue: netMargin2,
+          plainExplain: 'Gera mais dinheiro rápido se chover bem, mas deixa pouca palha e sofre mais se faltar chuva.',
+          scores: [52, 54, 48, 56, 54, 52, 92]
+        },
+        {
+          id: 'blindagem',
+          badge: '🛡️ Proteção Máxima da Terra',
+          title: 'Plano Terra Forte & Contra Seca',
+          subtitle: 'Ideal para terra cansada, dura ou região com pouca chuva.',
+          cycles: [
+            { period: '1ª Safra • Verão', crop: summer1, role: 'Base comercial da safra' },
+            { period: '2ª Safra • Safrinha', crop: safrinhaShield, role: 'Corta pragas de raiz e aduba a terra' },
+            { period: '3ª Safra • Inverno', crop: winterShield, role: 'Solta a terra dura sem precisar subsolar' }
+          ],
+          ureaSaved: nSaved3,
+          projectedMarginValue: netMargin3,
+          plainExplain: 'As raízes fundas descompactam o solo sozinhas, seguram a chuva e cortam pragas de raiz.',
+          scores: [94, 96, 94, 94, 95, 84, 68]
+        }
+      ];
+
+      renderSimpleDecisionCard();
+      renderTechScenarios();
+      updateRadarChart();
+      updateClimateStress();
+    }
+
+    function renderSimpleDecisionCard() {
+      const shield = state.agroShield;
+      const chosen = state.scenarios.find(s => s.id === state.selectedScenarioId) || state.scenarios[0];
+      if (!chosen || !shield) return;
+
+      // 1. Semaphore Banner
+      const banner = document.getElementById('semaphore-banner');
+      const iconEl = document.getElementById('semaphore-icon');
+      const titleEl = document.getElementById('semaphore-title');
+      const subEl = document.getElementById('semaphore-subtitle');
+
+      if (shield.status === 'Seco') {
+        banner.className = "p-5 sm:p-6 bg-rose-950 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4";
+        iconEl.textContent = "🔴";
+        titleEl.textContent = "Alerta: Terra com pouca água hoje";
+        subEl.textContent = shield.mensagemStatus;
+      } else if (shield.alertaIrrigacao) {
+        banner.className = "p-5 sm:p-6 bg-amber-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4";
+        iconEl.textContent = "🟡";
+        titleEl.textContent = "Atenção: Umidade no limite para os próximos dias";
+        subEl.textContent = shield.mensagemStatus;
+      } else {
+        banner.className = "p-5 sm:p-6 bg-emerald-950 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4";
+        iconEl.textContent = "🟢";
+        titleEl.textContent = "Tudo certo: Terra com boa umidade para plantar";
+        subEl.textContent = shield.mensagemStatus;
+      }
+
+      document.getElementById('summary-area-text').textContent = formatArea(state.areaHa);
+      document.getElementById('recommended-plan-title').textContent = `🌱 ${chosen.title}`;
+
+      // 2. 3 Cycles
+      document.getElementById('simple-3-cycles').innerHTML = chosen.cycles.map((c, idx) => `
+        <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
+          <div class="text-[11px] font-extrabold uppercase text-emerald-700">${c.period}</div>
+          <div class="text-sm font-extrabold text-slate-900">${c.crop}</div>
+          <div class="text-xs text-slate-600">${c.role}</div>
+        </div>
+      `).join('');
+
+      // 3. Financial Summary
+      const totalMargin = Math.round(chosen.projectedMarginValue * state.areaHa);
+      document.getElementById('simple-total-margin').textContent = `R$ ${totalMargin.toLocaleString('pt-BR')}`;
+      document.getElementById('simple-unit-margin').textContent = `R$ ${chosen.projectedMarginValue.toLocaleString('pt-BR')} por hectare (${formatArea(state.areaHa)})`;
+      document.getElementById('simple-urea-saved').textContent = `R$ ${chosen.ureaSaved}/ha (Total: R$ ${Math.round(chosen.ureaSaved * state.areaHa).toLocaleString('pt-BR')})`;
+    }
+
+    function toggleComparePlansModal() {
+      const modal = document.getElementById('compare-plans-modal');
+      modal.classList.toggle('hidden');
+      if (!modal.classList.contains('hidden')) {
+        document.getElementById('modal-plans-list').innerHTML = state.scenarios.map(sc => {
+          const active = sc.id === state.selectedScenarioId;
+          return `
+            <div onclick="choosePlanFromModal('${sc.id}')" class="p-4 rounded-2xl border-2 ${active ? 'border-emerald-600 bg-emerald-50/60' : 'border-slate-200 hover:border-emerald-400'} cursor-pointer flex flex-col justify-between space-y-3 transition">
+              <div class="space-y-2">
+                <span class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-900 text-white">${sc.badge}</span>
+                <div class="text-sm font-extrabold text-slate-900">${sc.title}</div>
+                <p class="text-xs text-slate-600">${sc.plainExplain}</p>
+                <div class="space-y-1 pt-1 text-xs">
+                  ${sc.cycles.map(c => `<div class="bg-white p-2 rounded-lg border border-slate-200"><strong>${c.period}:</strong> ${c.crop}</div>`).join('')}
+                </div>
+              </div>
+              <div class="pt-2 border-t border-slate-200">
+                <div class="text-xs font-extrabold text-emerald-900">Sobra est.: R$ ${sc.projectedMarginValue.toLocaleString('pt-BR')}/ha</div>
+                <button type="button" class="mt-2 w-full py-2 rounded-xl ${active ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white'} text-xs font-bold">
+                  ${active ? '✓ Plano Selecionado' : 'Escolher este Plano'}
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    function selectScenario(id) {
+      state.selectedScenarioId = id;
+      state.userManuallyPickedScenario = true;
+      renderSimpleDecisionCard();
+      renderTechScenarios();
+      updateClimateStress();
+      showToast("Plano selecionado!", "emerald");
+    }
+
+    function choosePlanFromModal(id) {
+      selectScenario(id);
+      toggleComparePlansModal();
+    }
+
+    function selectRiskSimulation(riskType, btnEl) {
+      state.selectedRiskType = riskType || 'normal';
+      document.querySelectorAll('.risk-sim-btn').forEach(b => {
+        b.className = "risk-sim-btn py-2.5 px-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-400 text-xs font-extrabold text-slate-800 cursor-pointer transition";
+      });
+      if (btnEl) {
+        btnEl.className = "risk-sim-btn py-2.5 px-3 rounded-xl border-2 border-emerald-600 bg-emerald-50 text-xs font-extrabold text-slate-900 cursor-pointer transition";
+      }
+
+      const simMap = {
+        normal: { rain: 0, temp: 0.0, frost: false, tip: "Em ano normal, manter palhada na entressafra economiza adubo e prepara a terra para o próximo plantio." },
+        seca: { rain: -25, temp: 1.5, frost: false, tip: "Na seca (-25% chuva), a cobertura de braquiária ou sorgo segura até 40% mais umidade na raiz." },
+        calor: { rain: -10, temp: 3.0, frost: false, tip: "No calor forte (+3°C), a palhada reduz a temperatura da terra em até 4°C e protege a florada." },
+        geada: { rain: 0, temp: 0.0, frost: true, tip: "Com risco de geada, evite milho tardio no inverno e prefira Aveia Preta ou Trigo, que aguentam frio." }
+      };
+      const cfg = simMap[state.selectedRiskType] || simMap.normal;
+      document.getElementById('stress-rain').value = cfg.rain;
+      document.getElementById('stress-temp').value = cfg.temp;
+      document.getElementById('stress-frost').checked = cfg.frost;
+      document.getElementById('simple-prevention-tip').innerHTML = `💡 <strong>Dica de proteção:</strong> ${cfg.tip}`;
+      runSimulation();
+    }
+
+    function updateClimateStress() {
+      const rainDelta = Number(document.getElementById('stress-rain').value);
+      const tempDelta = Number(document.getElementById('stress-temp').value);
+      const frostActive = document.getElementById('stress-frost').checked;
+      const isIrrigated = document.getElementById('input-irrigation').value === 'irrigado';
+
+      document.getElementById('stress-rain-val').textContent = `${rainDelta > 0 ? '+' : ''}${rainDelta}%`;
+      document.getElementById('stress-temp-val').textContent = `+${tempDelta.toFixed(1)} °C`;
+
+      const p1 = computeFao33YieldPreservation(0.92, rainDelta, tempDelta, state.nasaTemp, state.nasaSolar, 0.35, isIrrigated, frostActive, 0.72);
+      const p2 = computeFao33YieldPreservation(1.18, rainDelta, tempDelta, state.nasaTemp, state.nasaSolar, 0.05, isIrrigated, frostActive, 0.35);
+      const p3 = computeFao33YieldPreservation(0.80, rainDelta, tempDelta, state.nasaTemp, state.nasaSolar, 0.45, isIrrigated, frostActive, 0.85);
+      state.lastResilience = { pragmatico: p1, financeiro: p2, blindagem: p3 };
+
+      const currentPct = state.lastResilience[state.selectedScenarioId] ?? p1;
+      const pill = document.getElementById('simple-resilience-pill');
+      if (pill) {
+        pill.textContent = `🛡️ Segura ${currentPct}% da colheita`;
+        pill.className = `px-3 py-1.5 rounded-xl text-xs font-extrabold self-start sm:self-center ${currentPct >= 80 ? 'bg-emerald-100 text-emerald-900' : (currentPct >= 65 ? 'bg-amber-100 text-amber-950' : 'bg-rose-100 text-rose-900')}`;
+      }
+
+      const resCards = document.getElementById('resilience-cards');
+      if (resCards) {
+        resCards.innerHTML = [
+          { name: 'Equilibrado', val: p1 },
+          { name: 'Venda Rápida', val: p2 },
+          { name: 'Proteção Máxima', val: p3 }
+        ].map(i => `<div class="p-2.5 rounded-xl border border-slate-200 bg-white text-center"><div class="text-[11px] font-bold text-slate-600">${i.name}</div><div class="text-lg font-extrabold text-slate-900">${i.val}%</div></div>`).join('');
+      }
+
+      updateLossAndFuturesUI();
+    }
+
+    // =========================================================================
+    // ESTIMATIVA DE PERDAS & CALCULADORA DE VENDAS FUTURAS (HEDGE / CPR)
+    // =========================================================================
+    const CROP_ECONOMICS = {
+      soja:     { name: 'Soja',     unitShort: 'sc', unitFull: 'sacas (60kg)', yieldHa: 62,  price: 128, costHa: 4100 },
+      milho:    { name: 'Milho',    unitShort: 'sc', unitFull: 'sacas (60kg)', yieldHa: 115, price: 58,  costHa: 3900 },
+      feijao:   { name: 'Feijão',   unitShort: 'sc', unitFull: 'sacas (60kg)', yieldHa: 38,  price: 235, costHa: 4600 },
+      mandioca: { name: 'Mandioca', unitShort: 't',  unitFull: 'toneladas',    yieldHa: 26,  price: 520, costHa: 6800 },
+      algodao:  { name: 'Algodão',  unitShort: '@',  unitFull: 'arrobas (@)',  yieldHa: 310, price: 138, costHa: 14500 },
+      trigo:    { name: 'Trigo',    unitShort: 'sc', unitFull: 'sacas (60kg)', yieldHa: 52,  price: 76,  costHa: 3200 }
+    };
+
+    let lastSyncedFuturesCrop = 'soja';
+
+    function syncFuturesDefaultsForCrop(cropKey, force = false) {
+      const cfg = CROP_ECONOMICS[cropKey] || CROP_ECONOMICS.soja;
+      if (!force && lastSyncedFuturesCrop === cropKey) return;
+      lastSyncedFuturesCrop = cropKey;
+
+      const yieldEl = document.getElementById('fut-yield-ha');
+      const priceEl = document.getElementById('fut-price');
+      const costEl  = document.getElementById('fut-cost-ha');
+      if (yieldEl) yieldEl.value = cfg.yieldHa;
+      if (priceEl) priceEl.value = cfg.price;
+      if (costEl)  costEl.value  = cfg.costHa;
+
+      document.querySelectorAll('.fut-unit-label').forEach(el => { el.textContent = cfg.unitShort; });
+      const badge = document.getElementById('futures-crop-badge');
+      if (badge) badge.textContent = `${cfg.name} (${cfg.unitShort})`;
+    }
+
+    function calculateScenarioLossAndFutures(scenarioId) {
+      const p = getFarmProfile();
+      const cfg = CROP_ECONOMICS[p.crop] || CROP_ECONOMICS.soja;
+      const sc = state.scenarios.find(s => s.id === scenarioId) || state.scenarios[0] || { ureaSaved: 350, title: 'Plano' };
+      const area = Math.max(1, state.areaHa || 84.5);
+
+      const yieldHa = Math.max(1, Number(document.getElementById('fut-yield-ha')?.value) || cfg.yieldHa);
+      const price   = Math.max(1, Number(document.getElementById('fut-price')?.value) || cfg.price);
+      const costHa  = Math.max(100, Number(document.getElementById('fut-cost-ha')?.value) || cfg.costHa);
+      const hedgePct = Math.max(0, Math.min(85, Number(document.getElementById('fut-hedge-pct')?.value ?? 45)));
+
+      const resiliencePct = state.lastResilience[scenarioId] ?? 91;
+      const lossPct = Math.max(1, 100 - resiliencePct);
+
+      // Baseline sem cobertura / sem proteção (ex: monocultura solo exposto) para calcular prejuízo evitado
+      const rainDelta = Number(document.getElementById('stress-rain')?.value || 0);
+      const tempDelta = Number(document.getElementById('stress-temp')?.value || 0);
+      const frostActive = Boolean(document.getElementById('stress-frost')?.checked);
+      const isIrrigated = p.irrigation === 'irrigado';
+      const bareSoilPreservedPct = computeFao33YieldPreservation(1.25, rainDelta, tempDelta, state.nasaTemp, state.nasaSolar, 0.0, isIrrigated, frostActive, 0.25);
+
+      const potentialVol = yieldHa * area;
+      const netVol = potentialVol * (resiliencePct / 100);
+      const lossVol = Math.max(0, potentialVol - netVol);
+      const lossBrl = Math.round(lossVol * price);
+
+      const bareSoilNetVol = potentialVol * (bareSoilPreservedPct / 100);
+      const avoidedLossVol = Math.max(0, netVol - bareSoilNetVol);
+      const avoidedLossBrl = Math.round(avoidedLossVol * price);
+
+      const effectiveCostHa = Math.max(0, costHa - (sc.ureaSaved || 0));
+      const totalCostBrl = Math.round(effectiveCostHa * area);
+      const breakEvenUnitHa = Number((effectiveCostHa / price).toFixed(1));
+      const netYieldHa = Number((yieldHa * (resiliencePct / 100)).toFixed(1));
+
+      // Limite seguro de trava futura (nunca ultrapassar 68% da produção líquida ajustada ao risco climático)
+      const safeHedgeLimitPct = Math.max(20, Math.min(70, Math.round((resiliencePct * 0.65) / 5) * 5));
+
+      // Volume travado é calculado sobre a colheita prevista líquida (para segurança de entrega)
+      const hedgedVol = netVol * (hedgePct / 100);
+      const hedgedBrl = Math.round(hedgedVol * price);
+      const spotVol = Math.max(0, netVol - hedgedVol);
+      const spotBrl = Math.round(spotVol * price);
+
+      const costCoveragePct = totalCostBrl > 0 ? Math.round((hedgedBrl / totalCostBrl) * 100) : 100;
+      const grossRevenueBrl = hedgedBrl + spotBrl;
+      const netProfitBrl = grossRevenueBrl - totalCostBrl;
+      const netProfitHa = Math.round(netProfitBrl / area);
+
+      return {
+        cropName: cfg.name,
+        unitShort: cfg.unitShort,
+        unitFull: cfg.unitFull,
+        area,
+        yieldHa,
+        netYieldHa,
+        price,
+        costHa,
+        effectiveCostHa,
+        ureaSavedHa: sc.ureaSaved || 0,
+        resiliencePct,
+        lossPct,
+        potentialVol: Math.round(potentialVol),
+        netVol: Math.round(netVol),
+        lossVol: Math.round(lossVol),
+        lossBrl,
+        avoidedLossVol: Math.round(avoidedLossVol),
+        avoidedLossBrl,
+        totalCostBrl,
+        breakEvenUnitHa,
+        safeHedgeLimitPct,
+        hedgePct,
+        hedgedVol: Math.round(hedgedVol),
+        hedgedBrl,
+        spotVol: Math.round(spotVol),
+        spotBrl,
+        costCoveragePct,
+        grossRevenueBrl,
+        netProfitBrl,
+        netProfitHa
+      };
+    }
+
+    function updateLossAndFuturesUI() {
+      const p = getFarmProfile();
+      syncFuturesDefaultsForCrop(p.crop, false);
+
+      const calc = calculateScenarioLossAndFutures(state.selectedScenarioId);
+      state.lastFuturesCalc = calc;
+
+      const u = calc.unitShort;
+      const setEl = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+
+      setEl('fut-hedge-val', `${calc.hedgePct}%`);
+      setEl('fut-safe-limit-hint', `Limite seguro p/ este clima: até ${calc.safeHedgeLimitPct}%`);
+
+      // Card 1: Colheita Prevista
+      setEl('fut-net-prod', `${calc.netVol.toLocaleString('pt-BR')} ${u} (${calc.netYieldHa.toString().replace('.', ',')} ${u}/ha)`);
+      setEl('fut-potential-prod', `Potencial sem perda: ${calc.potentialVol.toLocaleString('pt-BR')} ${u}`);
+      setEl('fut-breakeven-text', `Paga custos com: ${calc.breakEvenUnitHa.toString().replace('.', ',')} ${u}/ha`);
+
+      // Card 2: Perda Estimada
+      setEl('fut-loss-pct-badge', `-${calc.lossPct}%`);
+      setEl('fut-loss-brl', `- R$ ${calc.lossBrl.toLocaleString('pt-BR')}`);
+      setEl('fut-loss-vol', `${calc.lossVol.toLocaleString('pt-BR')} ${u} de quebra estimada`);
+      setEl('fut-saved-loss-brl', calc.avoidedLossBrl > 0
+        ? `🛡️ Plano evita R$ ${calc.avoidedLossBrl.toLocaleString('pt-BR')} de prejuízo`
+        : `🛡️ Lavoura protegida no limite máximo`);
+
+      // Card 3: Venda Futura (Trava)
+      setEl('fut-hedged-brl', `R$ ${calc.hedgedBrl.toLocaleString('pt-BR')}`);
+      setEl('fut-hedged-vol', `${calc.hedgedVol.toLocaleString('pt-BR')} ${u} travadas (${calc.hedgePct}% da safra prevista)`);
+      setEl('fut-cost-coverage', `Cobre ${calc.costCoveragePct}% do custo líquido da lavoura`);
+
+      const statusBadge = document.getElementById('fut-hedge-status-badge');
+      const advisoryBox = document.getElementById('fut-advisory-box');
+      if (statusBadge && advisoryBox) {
+        if (calc.hedgePct > calc.safeHedgeLimitPct) {
+          statusBadge.textContent = 'Risco Alto';
+          statusBadge.className = 'px-1.5 py-0.5 rounded bg-rose-200 text-rose-950 text-[10px] font-extrabold';
+          advisoryBox.className = 'p-3 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-950 leading-relaxed';
+          advisoryBox.innerHTML = `⚠️ <strong>Atenção ao Risco de Entrega (Washout):</strong> Travar <strong>${calc.hedgePct}%</strong> está acima do limite seguro de <strong>${calc.safeHedgeLimitPct}%</strong> para o clima selecionado. Se houver seca ou geada, pode faltar produto para cumprir o contrato. Toque em <strong>Aplicar Trava Segura</strong>.`;
+        } else if (calc.hedgePct < 20) {
+          statusBadge.textContent = 'Pouca Trava';
+          statusBadge.className = 'px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 text-[10px] font-extrabold';
+          advisoryBox.className = 'p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 leading-relaxed';
+          advisoryBox.innerHTML = `💡 <strong>Dica de Proteção de Preço:</strong> Você travou apenas <strong>${calc.hedgePct}%</strong> (${calc.costCoveragePct}% dos custos). Recomenda-se travar cerca de <strong>${calc.safeHedgeLimitPct}%</strong> (${Math.round(calc.netVol * (calc.safeHedgeLimitPct / 100)).toLocaleString('pt-BR')} ${u}) em Barter ou Contrato Futuro para garantir os custos de plantio.`;
+        } else {
+          statusBadge.textContent = 'Trava Segura';
+          statusBadge.className = 'px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-950 text-[10px] font-extrabold';
+          advisoryBox.className = 'p-3 rounded-xl bg-white border border-emerald-200 text-xs text-slate-700 leading-relaxed';
+          advisoryBox.innerHTML = `✅ <strong>Estratégia Equilibrada:</strong> Travar <strong>${calc.hedgePct}%</strong> (${calc.hedgedVol.toLocaleString('pt-BR')} ${u} = <strong>R$ ${calc.hedgedBrl.toLocaleString('pt-BR')}</strong>) garante <strong>${calc.costCoveragePct}%</strong> dos custos da lavoura com folga segura contra quebras climáticas (limite seguro: <strong>${calc.safeHedgeLimitPct}%</strong>).`;
+        }
+      }
+
+      // Card 4: Saldo Livre & Resultado Líquido
+      const profitSign = calc.netProfitBrl >= 0 ? '' : '- ';
+      setEl('fut-net-profit-brl', `${profitSign}R$ ${Math.abs(calc.netProfitBrl).toLocaleString('pt-BR')}`);
+      setEl('fut-net-profit-ha', `${calc.netProfitHa >= 0 ? '' : '-'}R$ ${Math.abs(calc.netProfitHa).toLocaleString('pt-BR')} / ha (c/ economia de R$ ${calc.ureaSavedHa}/ha em adubo)`);
+      setEl('fut-spot-vol', `Livre p/ vender na colheita: ${calc.spotVol.toLocaleString('pt-BR')} ${u} (R$ ${calc.spotBrl.toLocaleString('pt-BR')})`);
+
+      // Sync top financial card with dynamic calculation as well
+      const simpleTotalMargin = document.getElementById('simple-total-margin');
+      const simpleUnitMargin = document.getElementById('simple-unit-margin');
+      if (simpleTotalMargin && simpleUnitMargin) {
+        simpleTotalMargin.textContent = `${profitSign}R$ ${Math.abs(calc.netProfitBrl).toLocaleString('pt-BR')}`;
+        simpleUnitMargin.textContent = `R$ ${calc.netProfitHa.toLocaleString('pt-BR')} por hectare (${formatArea(state.areaHa)})`;
+      }
+
+      // Update Technical Mode Comparative Matrix
+      setEl('tech-futures-summary-pill', `Trava Simulada: ${calc.hedgePct}% • Cotação: R$ ${calc.price}/${u}`);
+      const techTable = document.getElementById('tech-futures-table');
+      if (techTable && state.scenarios.length) {
+        techTable.innerHTML = state.scenarios.map(sc => {
+          const c = calculateScenarioLossAndFutures(sc.id);
+          const isSel = sc.id === state.selectedScenarioId;
+          return `
+            <div onclick="selectScenario('${sc.id}')" class="p-3.5 rounded-2xl border ${isSel ? 'border-emerald-600 bg-emerald-50/50' : 'border-slate-200 bg-slate-50'} space-y-2 cursor-pointer transition">
+              <div class="flex items-center justify-between">
+                <span class="font-extrabold text-slate-900">${sc.title}</span>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${c.lossPct <= 12 ? 'bg-emerald-100 text-emerald-900' : 'bg-amber-100 text-amber-900'}">Quebra: -${c.lossPct}%</span>
+              </div>
+              <div class="grid grid-cols-2 gap-1.5 text-[11px]">
+                <div class="bg-white p-2 rounded-lg border border-slate-200">
+                  <div class="text-slate-500">Colheita Líquida</div>
+                  <div class="font-extrabold text-slate-900">${c.netVol.toLocaleString('pt-BR')} ${u}</div>
+                </div>
+                <div class="bg-white p-2 rounded-lg border border-slate-200">
+                  <div class="text-slate-500">Perda Estimada</div>
+                  <div class="font-extrabold text-rose-700">- R$ ${c.lossBrl.toLocaleString('pt-BR')}</div>
+                </div>
+                <div class="bg-white p-2 rounded-lg border border-slate-200">
+                  <div class="text-slate-500">Trava Máx. Segura</div>
+                  <div class="font-extrabold text-sky-900">${c.safeHedgeLimitPct}% (${Math.round(c.netVol * c.safeHedgeLimitPct / 100).toLocaleString('pt-BR')} ${u})</div>
+                </div>
+                <div class="bg-white p-2 rounded-lg border border-slate-200">
+                  <div class="text-slate-500">Lucro Líquido</div>
+                  <div class="font-extrabold text-emerald-800">R$ ${c.netProfitBrl.toLocaleString('pt-BR')}</div>
+                </div>
+              </div>
+              <div class="text-[11px] text-slate-600 flex justify-between pt-0.5">
+                <span>Break-even: <strong>${c.breakEvenUnitHa.toString().replace('.', ',')} ${u}/ha</strong></span>
+                <span class="text-emerald-800 font-bold">Evita: R$ ${c.avoidedLossBrl.toLocaleString('pt-BR')}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    function onFuturesInputChange() {
+      updateLossAndFuturesUI();
+    }
+
+    function onFuturesHedgeSliderChange() {
+      updateLossAndFuturesUI();
+    }
+
+    function applyRecommendedHedge() {
+      const calc = calculateScenarioLossAndFutures(state.selectedScenarioId);
+      const slider = document.getElementById('fut-hedge-pct');
+      if (slider) {
+        slider.value = calc.safeHedgeLimitPct;
+        updateLossAndFuturesUI();
+        showToast(`Trava ajustada para o limite seguro (${calc.safeHedgeLimitPct}%)!`, "emerald");
+      }
+    }
+
+    function renderTechScenarios() {
+      const container = document.getElementById('scenarios-container');
+      if (!container) return;
+      container.innerHTML = state.scenarios.map(sc => `
+        <div onclick="selectScenario('${sc.id}')" class="bg-white rounded-2xl border ${sc.id === state.selectedScenarioId ? 'border-emerald-600 ring-2 ring-emerald-500/20' : 'border-slate-200'} p-4 space-y-2.5 cursor-pointer transition">
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900">${sc.badge}</span>
+          <h3 class="text-sm font-extrabold text-slate-900">${sc.title}</h3>
+          <div class="space-y-1.5 text-xs">
+            ${sc.cycles.map(c => `<div class="p-2 rounded-lg bg-slate-50 border border-slate-200"><strong>${c.period}:</strong> ${c.crop}</div>`).join('')}
+          </div>
+          <div class="text-xs font-bold text-emerald-800 pt-1">Margem: R$ ${sc.projectedMarginValue.toLocaleString('pt-BR')}/ha • Economia N: R$ ${sc.ureaSaved}/ha</div>
+        </div>
+      `).join('');
+
+      const shieldPanel = document.getElementById('agro-shield-panel');
+      if (shieldPanel && state.agroShield) {
+        const s = state.agroShield;
+        shieldPanel.innerHTML = `<div class="p-4 rounded-2xl bg-slate-900 text-white text-xs flex flex-wrap items-center justify-between gap-2">
+          <div><strong>Motor Agro Shield (${s.zarcCode}):</strong> ARM ${s.armMm} / CAD ${s.cadMm} mm (${s.pctCad}%) • Kc ${s.kc.toFixed(2)}</div>
+          <span class="px-2.5 py-1 rounded-full bg-emerald-600 font-bold">${s.status}</span>
+        </div>`;
+      }
+    }
+
+    function updateRadarChart() {
+      const el = document.getElementById('radarChart');
+      if (!el || !state.scenarios.length) return;
+      if (radarChart) radarChart.destroy();
+      radarChart = new Chart(el.getContext('2d'), {
+        type: 'radar',
+        data: {
+          labels: ['Nitrogênio', 'Erosão', 'Mat. Orgânica', 'Pragas', 'Água', 'Forragem', 'Margem'],
+          datasets: [
+            { label: 'Equilibrado', data: state.scenarios[0].scores, borderColor: '#059669', backgroundColor: 'rgba(5,150,105,0.2)' },
+            { label: 'Venda Rápida', data: state.scenarios[1].scores, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.15)' },
+            { label: 'Proteção Máxima', data: state.scenarios[2].scores, borderColor: '#0f766e', backgroundColor: 'rgba(15,118,110,0.15)' }
+          ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, scales: { r: { min: 30, max: 100 } } }
+      });
+    }
+
+    function updateHistoricalChart() {
+      const el = document.getElementById('historicalChart');
+      if (!el) return;
+      const preset = PRESETS[state.regionKey];
+      const years = ['2021', '2022', '2023', '2024', '2025', '2026'];
+      if (historicalChart) historicalChart.destroy();
+      historicalChart = new Chart(el.getContext('2d'), {
+        type: 'bar',
+        data: {
+          labels: years,
+          datasets: [
+            { type: 'line', label: 'Umidade SMAP (%)', data: years.map(y => preset.history[y].smap), borderColor: '#059669' },
+            { type: 'bar', label: 'Dias Solo Nu', data: years.map(y => preset.history[y].bare), backgroundColor: 'rgba(245,158,11,0.6)' }
+          ]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+      });
+    }
+
+    function updateYearView(year) {
+      state.selectedYear = Number(year);
+      document.getElementById('selected-year-badge').textContent = year;
+      updateDiagnosticUI();
+      runSimulation();
+    }
+
+    function updatePriorityLabels() {
+      const soil = Number(document.getElementById('prio-soil-vs-cash').value);
+      document.getElementById('prio-balance-label').textContent = `${100 - soil}% / ${soil}%`;
+      document.getElementById('prio-water-val').textContent = `${document.getElementById('prio-water').value}%`;
+      document.getElementById('prio-pest-val').textContent = `${document.getElementById('prio-pest').value}%`;
+    }
+
+    // =========================================================================
+    // WIZARD & EXPERIENCE MODE SWITCHING
+    // =========================================================================
+    function goToWizardStep(step) {
+      wizardStep = step;
+      if (experienceMode !== 'produtor') return;
+
+      document.getElementById('etapa-1').classList.toggle('hidden', step !== 1);
+      document.getElementById('etapa-2').classList.toggle('hidden', step !== 2);
+      document.getElementById('etapa-3').classList.toggle('hidden', step !== 3);
+
+      [1, 2, 3].forEach(n => {
+        const btn = document.getElementById(`wiz-btn-${n}`);
+        const badge = btn.querySelector('span');
+        const active = n === step;
+        const done = n < step;
+        btn.className = active
+          ? "flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3 p-3 rounded-2xl border-2 border-emerald-600 bg-white shadow-sm text-center sm:text-left transition cursor-pointer"
+          : "flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3 p-3 rounded-2xl border border-slate-200 bg-white/80 hover:border-emerald-400 text-center sm:text-left transition cursor-pointer";
+        badge.className = active || done
+          ? "w-7 h-7 rounded-full bg-emerald-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0"
+          : "w-7 h-7 rounded-full bg-slate-200 text-slate-700 text-xs font-extrabold flex items-center justify-center shrink-0";
+      });
+
+      if (step === 1 && map) setTimeout(() => map.invalidateSize(), 120);
+      if (step === 3) runAgroShieldBonus();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function toggleExperienceModeQuick() {
+      setExperienceMode(experienceMode === 'produtor' ? 'tecnico' : 'produtor');
+    }
+
+    function setExperienceMode(mode) {
+      experienceMode = mode;
+      const isSimple = mode === 'produtor';
+
+      document.getElementById('btn-mode-produtor').className = isSimple
+        ? "px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer bg-emerald-500 text-slate-950 shadow-sm"
+        : "px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer text-emerald-100 hover:text-white";
+      document.getElementById('btn-mode-tecnico').className = !isSimple
+        ? "px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer bg-emerald-500 text-slate-950 shadow-sm"
+        : "px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer text-emerald-100 hover:text-white";
+
+      document.getElementById('telemetry-bar').classList.toggle('hidden', isSimple);
+      document.getElementById('wizard-nav').classList.toggle('hidden', !isSimple);
+      document.getElementById('farmer-visual-gauges').classList.toggle('hidden', !isSimple);
+      document.getElementById('tech-diagnostics-panel').classList.toggle('hidden', isSimple);
+      document.getElementById('historical-player-box').classList.toggle('hidden', isSimple);
+      document.getElementById('ndvi-controls-bar').classList.toggle('hidden', isSimple);
+
+      document.getElementById('farmer-visual-inputs').classList.toggle('hidden', !isSimple);
+      document.getElementById('tech-panel-step2').classList.toggle('hidden', isSimple);
+      document.getElementById('wiz-footer-1').classList.toggle('hidden', !isSimple);
+      document.getElementById('wiz-footer-2').classList.toggle('hidden', !isSimple);
+
+      document.getElementById('farmer-decision-hub').classList.toggle('hidden', !isSimple);
+      document.getElementById('tech-scenarios-wrapper').classList.toggle('hidden', isSimple);
+
+      if (isSimple) {
+        syncVisualButtonsFromSelects();
+        goToWizardStep(wizardStep || 1);
+      } else {
+        ['etapa-1', 'etapa-2', 'etapa-3'].forEach(id => document.getElementById(id).classList.remove('hidden'));
+        if (map) setTimeout(() => map.invalidateSize(), 120);
+      }
+    }
+
+    // =========================================================================
+    // QUICK SELECTION HELPERS
+    // =========================================================================
+    function syncVisualButtonsFromSelects() {
+      [
+        { selectId: 'input-crop', btnClass: '.quick-crop-btn' },
+        { selectId: 'input-soil', btnClass: '.quick-soil-btn' },
+        { selectId: 'input-irrigation', btnClass: '.quick-irr-btn' }
+      ].forEach(cfg => {
+        const val = document.getElementById(cfg.selectId).value;
+        document.querySelectorAll(cfg.btnClass).forEach(btn => {
+          const isActive = (btn.getAttribute('onclick') || '').includes(`'${val}'`);
+          btn.className = btn.className.replace('border-2 border-emerald-600 bg-emerald-50', 'border border-slate-200 bg-white hover:border-emerald-400');
+          if (isActive) btn.className = btn.className.replace('border border-slate-200 bg-white hover:border-emerald-400', 'border-2 border-emerald-600 bg-emerald-50');
+        });
+      });
+    }
+
+    function quickSelectField(field, value, btnEl) {
+      const mapIds = {
+        crop: { selectId: 'input-crop', btnClass: '.quick-crop-btn' },
+        soil: { selectId: 'input-soil', btnClass: '.quick-soil-btn' },
+        irrigation: { selectId: 'input-irrigation', btnClass: '.quick-irr-btn' }
+      };
+      const cfg = mapIds[field];
+      if (!cfg) return;
+      document.getElementById(cfg.selectId).value = value;
+      document.querySelectorAll(cfg.btnClass).forEach(b => {
+        b.className = b.className.replace('border-2 border-emerald-600 bg-emerald-50', 'border border-slate-200 bg-white hover:border-emerald-400');
+      });
+      btnEl.className = btnEl.className.replace('border border-slate-200 bg-white hover:border-emerald-400', 'border-2 border-emerald-600 bg-emerald-50');
+      updateDiagnosticUI();
+      runSimulation();
+    }
+
+    function selectDapPreset(dap, btnEl) {
+      document.getElementById('input-dap').value = dap;
+      document.getElementById('val-dap').textContent = `${dap} dias`;
+      document.querySelectorAll('.quick-dap-btn').forEach(b => {
+        b.className = b.className.replace('border-2 border-emerald-600 bg-emerald-50', 'border border-slate-200 bg-white hover:border-emerald-400');
+      });
+      if (btnEl) btnEl.className = btnEl.className.replace('border border-slate-200 bg-white hover:border-emerald-400', 'border-2 border-emerald-600 bg-emerald-50');
+      runSimulation();
+    }
+
+    function setSimpleMiudas(hasMiudas) {
+      document.getElementById('mach-miudas').checked = hasMiudas;
+      document.getElementById('simple-miudas-sim').className = hasMiudas
+        ? "py-2.5 px-3 rounded-xl text-xs font-extrabold bg-emerald-600 text-white cursor-pointer transition"
+        : "py-2.5 px-3 rounded-xl text-xs font-extrabold bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition";
+      document.getElementById('simple-miudas-nao').className = !hasMiudas
+        ? "py-2.5 px-3 rounded-xl text-xs font-extrabold bg-amber-500 text-slate-950 cursor-pointer transition"
+        : "py-2.5 px-3 rounded-xl text-xs font-extrabold bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition";
+      runSimulation();
+    }
+
+    function applyFarmerGoal(goal, btnEl) {
+      const presets = {
+        caixa: { soil: 20, water: 40, pest: 45 },
+        equilibrio: { soil: 60, water: 75, pest: 70 },
+        solo: { soil: 90, water: 90, pest: 90 }
+      };
+      const g = presets[goal] || presets.equilibrio;
+      document.getElementById('prio-soil-vs-cash').value = g.soil;
+      document.getElementById('prio-water').value = g.water;
+      document.getElementById('prio-pest').value = g.pest;
+      document.querySelectorAll('.goal-btn').forEach(b => {
+        b.className = "goal-btn p-2.5 rounded-xl border border-slate-200 bg-white hover:border-emerald-500 text-center cursor-pointer transition";
+      });
+      if (btnEl) btnEl.className = "goal-btn p-2.5 rounded-xl border-2 border-emerald-600 bg-emerald-50 text-center cursor-pointer transition";
+      state.userManuallyPickedScenario = false;
+      updatePriorityLabels();
+      runSimulation();
+    }
+
+    function useDeviceGPS() {
+      if (!navigator.geolocation) {
+        showToast("Toque direto no mapa para marcar sua terra!", "amber");
+        return;
+      }
+      showToast("Buscando sua localização...", "emerald");
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude, lon = pos.coords.longitude, d = 0.0038;
+          const poly = [[lat + d, lon - d], [lat + d, lon + d], [lat - d, lon + d], [lat - d, lon - d]];
+          map.setView([lat, lon], 14);
+          drawFieldPolygon(poly);
+          updateCoordinatesAndFetchOrbital(lat, lon, poly, "Minha Propriedade (GPS)");
+          showToast("Localização encontrada!", "emerald");
+        },
+        () => showToast("Não foi possível usar o GPS. Toque no mapa.", "amber"),
+        { timeout: 6000 }
+      );
+    }
+
+    // =========================================================================
+    // REPORT & MODALS
+    // =========================================================================
+    function openReportModal() {
+      const p = getFarmProfile();
+      const chosen = state.scenarios.find(s => s.id === state.selectedScenarioId) || state.scenarios[0];
+      const resiliencePct = state.lastResilience[chosen.id] ?? 91;
+      const fut = state.lastFuturesCalc || calculateScenarioLossAndFutures(chosen.id);
+
+      const reportText = `🌱 *PLANO SIMPLES DE SAFRA — AGROCYCLE AI*
+----------------------------------------
+📍 *Local:* ${state.locationLabel}
+📐 *Tamanho:* ${formatArea(state.areaHa)}
+🌾 *Lavoura Principal:* ${p.crop.toUpperCase()} (${p.soil}, ${p.irrigation})
+
+✅ *${chosen.title.toUpperCase()}*
+1️⃣ ${chosen.cycles[0].period}: *${chosen.cycles[0].crop}*
+2️⃣ ${chosen.cycles[1].period}: *${chosen.cycles[1].crop}*
+3️⃣ ${chosen.cycles[2].period}: *${chosen.cycles[2].crop}*
+
+📊 *ESTIMATIVA DE PERDAS E VENDAS FUTURAS (${fut.cropName.toUpperCase()}):*
+• Colheita Prevista (c/ clima): *${fut.netVol.toLocaleString('pt-BR')} ${fut.unitShort}* (${fut.netYieldHa.toString().replace('.', ',')} ${fut.unitShort}/ha)
+• Perda / Quebra Estimada (-${fut.lossPct}%): *${fut.lossVol.toLocaleString('pt-BR')} ${fut.unitShort}* (- R$ ${fut.lossBrl.toLocaleString('pt-BR')})
+• Prejuízo Evitado pelo Plano: *+ R$ ${fut.avoidedLossBrl.toLocaleString('pt-BR')}*
+• Ponto de Equilíbrio (paga custos): *${fut.breakEvenUnitHa.toString().replace('.', ',')} ${fut.unitShort}/ha*
+• Trava de Venda Futura (${fut.hedgePct}%): *${fut.hedgedVol.toLocaleString('pt-BR')} ${fut.unitShort}* = *R$ ${fut.hedgedBrl.toLocaleString('pt-BR')}* (cobre ${fut.costCoveragePct}% do custo; limite seguro: até ${fut.safeHedgeLimitPct}%)
+• Saldo Livre p/ Colheita (Spot): *${fut.spotVol.toLocaleString('pt-BR')} ${fut.unitShort}* (R$ ${fut.spotBrl.toLocaleString('pt-BR')})
+
+💰 *RESULTADO FINANCEIRO PROJETADO:*
+• Lucro Líquido Estimado: *R$ ${fut.netProfitBrl.toLocaleString('pt-BR')}* (R$ ${fut.netProfitHa.toLocaleString('pt-BR')}/ha)
+• Economia com adubo (Ureia): *R$ ${chosen.ureaSaved}/ha*
+• Resistência ao clima: *${resiliencePct}% da colheita protegida*
+
+💡 *Resumo:* ${chosen.plainExplain}
+
+_Gerado pelo AgroCycle AI. Converse sempre com o técnico ou agrônomo da sua região antes do plantio._`;
+
+      document.getElementById('report-content').textContent = reportText;
+      document.getElementById('report-modal').classList.remove('hidden');
+    }
+
+    function closeReportModal() { document.getElementById('report-modal').classList.add('hidden'); }
+    function openTranslatorModal(topic) {
+      const docs = {
+        smap: { title: "Água no Solo (SMAP)", body: "Mede a umidade nos primeiros centímetros da terra para saber se há reserva hídrica para germinação." },
+        ndvi: { title: "Verde da Lavoura (NDVI)", body: "Mostra onde há planta ativa (verde) e onde a terra está descoberta (vermelho/amarelo)." }
+      };
+      const d = docs[topic] || docs.smap;
+      document.getElementById('trans-title').textContent = d.title;
+      document.getElementById('trans-body').textContent = d.body;
+      document.getElementById('translator-modal').classList.remove('hidden');
+    }
+    function closeTranslatorModal() { document.getElementById('translator-modal').classList.add('hidden'); }
+    function openScienceModal() { document.getElementById('science-modal').classList.remove('hidden'); }
+    function closeScienceModal() { document.getElementById('science-modal').classList.add('hidden'); }
+
+    async function copyReportToClipboard() {
+      const text = document.getElementById('report-content').textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast("Copiado! Agora é só colar no WhatsApp.", "emerald");
+      } catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+        showToast("Copiado! Agora é só colar no WhatsApp.", "emerald");
+      }
+    }
+
+    function showToast(message, type = "emerald") {
+      const box = document.getElementById('toast-box');
+      const toast = document.createElement('div');
+      toast.className = `${type === "amber" ? "bg-amber-500 text-slate-950" : "bg-slate-900 text-white border border-emerald-500/40"} px-4 py-3 rounded-2xl shadow-xl text-xs font-bold transition-all duration-300`;
+      toast.textContent = message;
+      box.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    // =========================================================================
+    // BÔNUS: MEDIÇÃO HÍDRICA DIÁRIA (SOILGRIDS + OPEN-METEO / AGRO SHIELD)
+    // =========================================================================
+    let bonusWaterChartInstance = null;
+
+    function bonusToISODate(d) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function bonusParseISODate(str) {
+      const [y, m, d] = str.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function bonusAddDays(d, days) {
+      const copy = new Date(d.getTime());
+      copy.setDate(copy.getDate() + days);
+      return copy;
+    }
+
+    function bonusDiffDays(a, b) {
+      const utcA = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
+      const utcB = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
+      return Math.round((utcA - utcB) / 86400000);
+    }
+
+    function bonusClassifySoil(clayPercent, sandPercent) {
+      if (clayPercent >= 35.0) return 'Argiloso';
+      if (clayPercent >= 15.0 && clayPercent < 35.0) return sandPercent < 85.0 ? 'Médio' : 'Arenoso';
+      return 'Arenoso';
+    }
+
+    function bonusCalculateAD(vwc33, vwc1500, tipoSolo = 'Médio') {
+      const ad = vwc33 - vwc1500;
+      if (!(ad > 0)) {
+        const fallbacks = { Argiloso: 0.15, 'Médio': 0.11, Arenoso: 0.07 };
+        return fallbacks[tipoSolo] ?? 0.11;
+      }
+      return ad;
+    }
+
+    async function bonusFetchSoilProperties(lat, lon) {
+      const cacheKey = `agroshield_soil_${lat.toFixed(4)}_${lon.toFixed(4)}`;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) return JSON.parse(cached);
+      } catch {}
+
+      const url = new URL('https://rest.isric.org/soilgrids/v2.0/properties/query');
+      url.searchParams.set('lon', lon);
+      url.searchParams.set('lat', lat);
+      ['clay', 'sand', 'wv0033', 'wv1500'].forEach(p => url.searchParams.append('property', p));
+      ['0-5cm', '5-15cm'].forEach(d => url.searchParams.append('depth', d));
+      url.searchParams.set('value', 'mean');
+
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 9000);
+        const resp = await fetch(url.toString(), { signal: ctrl.signal });
+        clearTimeout(tid);
+        if (!resp.ok) throw new Error(`SoilGrids HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        const results = {};
+        for (const layer of (data?.properties?.layers || [])) {
+          const dFactor = layer.unit_measure?.d_factor || 1;
+          const depths = layer.depths || [];
+          if (!depths.length) continue;
+          const values = depths.map(d => d.values?.mean ?? 0);
+          results[layer.name] = (values.reduce((a, b) => a + b, 0) / values.length) / dFactor;
+        }
+
+        if ((results.clay || 0) === 0 && (results.sand || 0) === 0) throw new Error('Solo vazio');
+        const payload = {
+          clay: results.clay ?? 28,
+          sand: results.sand ?? 42,
+          wv0033: results.wv0033 ?? 0.30,
+          wv1500: results.wv1500 ?? 0.19,
+          source: 'SoilGrids'
+        };
+        try { localStorage.setItem(cacheKey, JSON.stringify(payload)); } catch {}
+        return payload;
+      } catch {
+        return { clay: 28.0, sand: 42.0, wv0033: 0.30, wv1500: 0.19, source: 'Solo Estimado' };
+      }
+    }
+
+    async function bonusFetchWeatherData(lat, lon, startDateStr, endDateStr) {
+      const cacheKey = `agroshield_weather_${lat.toFixed(3)}_${lon.toFixed(3)}_${startDateStr}_${endDateStr}`;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Date.now() - parsed.ts < 3600 * 1000) return parsed;
+        }
+      } catch {}
+
+      const url = new URL('https://api.open-meteo.com/v1/forecast');
+      url.searchParams.set('latitude', lat);
+      url.searchParams.set('longitude', lon);
+      url.searchParams.set('start_date', startDateStr);
+      url.searchParams.set('end_date', endDateStr);
+      url.searchParams.set('daily', 'precipitation_sum,et0_fao_evapotranspiration');
+      url.searchParams.set('hourly', 'soil_moisture_0_to_7cm');
+      url.searchParams.set('timezone', 'America/Sao_Paulo');
+
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 10000);
+        const resp = await fetch(url.toString(), { signal: ctrl.signal });
+        clearTimeout(tid);
+        if (!resp.ok) throw new Error(`Open-Meteo HTTP ${resp.status}`);
+        const data = await resp.json();
+
+        const hourlyByDay = {};
+        const hTimes = data?.hourly?.time || [];
+        const hSm = data?.hourly?.soil_moisture_0_to_7cm || [];
+        for (let i = 0; i < hTimes.length; i++) {
+          const day = hTimes[i].slice(0, 10);
+          const val = hSm[i];
+          if (val !== null && val !== undefined) {
+            if (!hourlyByDay[day]) hourlyByDay[day] = [];
+            hourlyByDay[day].push(val);
+          }
+        }
+
+        const dTimes = data?.daily?.time || [];
+        const dRain = data?.daily?.precipitation_sum || [];
+        const dEto = data?.daily?.et0_fao_evapotranspiration || [];
+        const rows = dTimes.map((dateStr, idx) => {
+          const smArr = hourlyByDay[dateStr];
+          return {
+            date: dateStr,
+            precipitation_sum: dRain[idx] ?? 0,
+            et0_fao_evapotranspiration: dEto[idx] ?? 0,
+            satellite_soil_moisture: smArr && smArr.length ? smArr.reduce((a, b) => a + b, 0) / smArr.length : null
+          };
+        });
+
+        const payload = { rows, source: 'Open-Meteo', ts: Date.now() };
+        try { localStorage.setItem(cacheKey, JSON.stringify(payload)); } catch {}
+        return payload;
+      } catch {
+        const rows = [];
+        const start = bonusParseISODate(startDateStr);
+        const total = bonusDiffDays(bonusParseISODate(endDateStr), start);
+        for (let i = 0; i <= total; i++) {
+          const cur = bonusAddDays(start, i);
+          const seed = Math.abs(Math.sin(i * 1.7 + lat + lon));
+          rows.push({
+            date: bonusToISODate(cur),
+            precipitation_sum: seed > 0.72 ? Math.round(seed * 24 * 10) / 10 : 0,
+            et0_fao_evapotranspiration: Math.round((3.2 + seed * 2.1) * 10) / 10,
+            satellite_soil_moisture: 0.24 + (seed - 0.5) * 0.04
+          });
+        }
+        return { rows, source: 'Clima Simulado', ts: Date.now() };
+      }
+    }
+
+    function bonusRunWaterBalanceSimulation(weatherRows, ad, plantingDate, vwc33, vwc1500, cultura) {
+      const results = [];
+      let armPrev = null;
+
+      for (const row of weatherRows) {
+        const dap = bonusDiffDays(bonusParseISODate(row.date), plantingDate);
+        if (dap < 0) continue;
+
+        const { kc, zCm } = obterParametrosCulturaAgroShield(cultura, dap);
+        const cadDiaria = ad * zCm * 10.0;
+        const satSm = row.satellite_soil_moisture;
+        const adRef = vwc33 - vwc1500;
+
+        if (armPrev === null) {
+          if (satSm !== null && satSm !== undefined && !Number.isNaN(satSm) && adRef > 0) {
+            const satFraction = (satSm - vwc1500) / adRef;
+            armPrev = Math.max(0.0, Math.min(satFraction * cadDiaria, cadDiaria));
+          } else {
+            armPrev = cadDiaria;
+          }
+        }
+
+        const eto = row.et0_fao_evapotranspiration || 0.0;
+        const chuva = row.precipitation_sum || 0.0;
+        let armCalc = Math.max(0.0, Math.min(armPrev + chuva - (eto * kc), cadDiaria));
+
+        if (satSm !== null && satSm !== undefined && !Number.isNaN(satSm) && adRef > 0) {
+          const satArm = Math.max(0.0, Math.min(((satSm - vwc1500) / adRef) * cadDiaria, cadDiaria));
+          if (Math.abs(armCalc - satArm) > 0.2 * cadDiaria) {
+            armCalc = armCalc * 0.7 + satArm * 0.3;
+          }
+        }
+
+        results.push({
+          date: row.date,
+          arm_mm: Math.round(armCalc * 100) / 100,
+          cad_diaria_mm: Math.round(cadDiaria * 100) / 100,
+          chuva_mm: Math.round(chuva * 100) / 100,
+          eto_mm: Math.round(eto * 100) / 100
+        });
+        armPrev = armCalc;
+      }
+      return results;
+    }
+
+    function renderBonusWaterChart(dashboardData) {
+      const canvas = document.getElementById('bonusWaterChart');
+      if (!canvas || !window.Chart) return;
+
+      const labels = dashboardData.map(d => {
+        const [, m, day] = d.date.split('-');
+        return `${day}/${m}`;
+      });
+
+      if (bonusWaterChartInstance) bonusWaterChartInstance.destroy();
+      const ctx = canvas.getContext('2d');
+      const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+      gradient.addColorStop(0, 'rgba(16, 185, 129, 0.32)');
+      gradient.addColorStop(1, 'rgba(16, 185, 129, 0)');
+
+      bonusWaterChartInstance = new Chart(ctx, {
+        data: {
+          labels,
+          datasets: [
+            {
+              type: 'line',
+              label: 'Água estimada no solo (mm)',
+              data: dashboardData.map(d => d.arm_mm),
+              borderColor: '#059669',
+              backgroundColor: gradient,
+              borderWidth: 2.5,
+              fill: true,
+              tension: 0.35,
+              pointRadius: 0,
+              pointHoverRadius: 4
+            },
+            {
+              type: 'bar',
+              label: 'Chuva / Previsão (mm)',
+              data: dashboardData.map(d => d.chuva_mm),
+              backgroundColor: '#0284c7',
+              borderRadius: 3
+            },
+            {
+              type: 'bar',
+              label: 'Déficit previsto / Irrigar (mm)',
+              data: dashboardData.map(d => d.irrigacao_necessaria_mm),
+              backgroundColor: '#f59e0b',
+              borderRadius: 3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { labels: { color: '#475569', font: { size: 11, family: 'Inter' } } }
+          },
+          scales: {
+            x: { ticks: { color: '#64748b', maxTicksLimit: 8, font: { size: 10 } }, grid: { display: false } },
+            y: { ticks: { color: '#64748b', font: { size: 10 }, callback: v => `${v}mm` }, grid: { color: 'rgba(148,163,184,0.18)' } }
+          }
+        }
+      });
+    }
+
+    async function runAgroShieldBonus() {
+      const sourcePill = document.getElementById('bonus-source-pill');
+      if (!sourcePill) return;
+      sourcePill.textContent = 'Calculando previsão...';
+
+      const p = getFarmProfile();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayStr = bonusToISODate(today);
+      const effectiveDap = Math.max(10, Math.min(140, Number(p.dap) || 20));
+      const plantingDate = bonusAddDays(today, -effectiveDap);
+
+      const soil = await bonusFetchSoilProperties(state.lat, state.lon);
+      const tipoSolo = bonusClassifySoil(soil.clay, soil.sand);
+      let vwc33 = soil.wv0033 > 1.0 ? soil.wv0033 / 100.0 : soil.wv0033;
+      let vwc1500 = soil.wv1500 > 1.0 ? soil.wv1500 / 100.0 : soil.wv1500;
+      const ad = bonusCalculateAD(vwc33, vwc1500, tipoSolo);
+
+      const apiLimitDate = bonusAddDays(today, -90);
+      const startWeather = plantingDate > apiLimitDate ? plantingDate : apiLimitDate;
+      const endWeather = bonusAddDays(today, 7);
+
+      const weather = await bonusFetchWeatherData(
+        state.lat,
+        state.lon,
+        bonusToISODate(startWeather),
+        bonusToISODate(endWeather)
+      );
+
+      const simResults = bonusRunWaterBalanceSimulation(weather.rows, ad, plantingDate, vwc33, vwc1500, p.crop);
+
+      let armAtual = 0, cadAtual = 0, alertaIrrigacao = false, diasAteSeca = 0;
+      let mensagemStatus = 'Solo com umidade adequada';
+      let currentStatus = 'Úmido';
+
+      const dashboardData = [];
+      for (let i = 0; i < simResults.length; i++) {
+        const res = simResults[i];
+        let irrNec = 0;
+        if (res.date >= todayStr && res.arm_mm < 0.5 * res.cad_diaria_mm) {
+          irrNec = Math.round((res.cad_diaria_mm - res.arm_mm) * 100) / 100;
+        }
+        dashboardData.push({
+          date: res.date,
+          arm_mm: res.arm_mm,
+          chuva_mm: res.chuva_mm,
+          eto_mm: res.eto_mm,
+          irrigacao_necessaria_mm: irrNec
+        });
+
+        if (res.date === todayStr) {
+          armAtual = res.arm_mm;
+          cadAtual = res.cad_diaria_mm;
+          if (armAtual <= 0.5 * cadAtual) {
+            currentStatus = 'Seco';
+            mensagemStatus = 'Atenção: água abaixo do limite seguro';
+          }
+        }
+
+        if (res.date > todayStr && !alertaIrrigacao && res.arm_mm <= 0.5 * res.cad_diaria_mm) {
+          alertaIrrigacao = true;
+          diasAteSeca = bonusDiffDays(bonusParseISODate(res.date), today);
+          const chuvaPrev = res.chuva_mm;
+          const chuvaAnt = i > 0 ? simResults[i - 1].chuva_mm : 0;
+          if (chuvaPrev > 10 || chuvaAnt > 10) {
+            alertaIrrigacao = false;
+            mensagemStatus = `Chuva prevista (${Math.max(chuvaPrev, chuvaAnt)} mm) supre a planta`;
+          } else {
+            mensagemStatus = `Irrigar em até ${diasAteSeca} dias`;
+          }
+        }
+      }
+
+      const statusEl = document.getElementById('bonus-res-status');
+      statusEl.textContent = currentStatus;
+      statusEl.className = `text-lg font-extrabold ${currentStatus === 'Seco' ? 'text-rose-600' : 'text-emerald-700'}`;
+      document.getElementById('bonus-res-msg').textContent = mensagemStatus;
+      document.getElementById('bonus-res-soil').textContent = `Solo: ${tipoSolo}`;
+      document.getElementById('bonus-res-cad').textContent = `Máx: ${cadAtual.toFixed(1)} mm`;
+      sourcePill.textContent = `${soil.source} • ${weather.source}`;
+
+      document.getElementById('bonus-res-arm').textContent = armAtual.toFixed(1);
+      const pct = cadAtual > 0 ? Math.min(100, Math.round((armAtual / cadAtual) * 100)) : 0;
+      const barEl = document.getElementById('bonus-res-arm-bar');
+      barEl.style.width = `${pct}%`;
+      barEl.className = `h-full rounded-full transition-all duration-500 ${pct <= 50 ? 'bg-amber-500' : 'bg-emerald-500'}`;
+      document.getElementById('bonus-res-pct').textContent = `${pct}% da capacidade útil`;
+
+      const irrTitle = document.getElementById('bonus-res-irr-title');
+      const irrSub = document.getElementById('bonus-res-irr-sub');
+      if (alertaIrrigacao) {
+        irrTitle.textContent = `${diasAteSeca} dias`;
+        irrTitle.className = 'text-lg font-extrabold text-amber-600';
+        irrSub.textContent = 'Atenção necessária na semana';
+      } else {
+        irrTitle.textContent = 'Seguro';
+        irrTitle.className = 'text-lg font-extrabold text-emerald-700';
+        irrSub.textContent = 'Sem falta imediata prevista';
+      }
+
+      renderBonusWaterChart(dashboardData);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+      if (typeof L !== 'undefined') initMap();
+      setExperienceMode('produtor');
+      syncVisualButtonsFromSelects();
+      updateDiagnosticUI();
+      updateHistoricalChart();
+      runSimulation();
+      fetchNasaPowerClimatology(state.lat, state.lon);
+      fetchPlanetaryComputerNDVI(state.currentPolygon);
+    });
+  </script>
+</body>
+</html>
