@@ -30,7 +30,8 @@ let state = {
   scenarios: [],
   selectedYear: 2026,
   isCustomLocation: false,
-  locationLabel: PRESETS.campo_mourao.name,
+  locationSelected: false,
+  locationLabel: 'Local não selecionado',
   lastResilience: { pragmatico: 91, financeiro: 72, blindagem: 96 },
   stacNoScene: false,
   agroShield: null,
@@ -43,6 +44,29 @@ let map, fieldPolygon, ndviTileLayer = null, ndviOfflineOverlay = null;
 let drawMode = false, tempVertices = [], tempMarkers = [];
 let historicalChart = null, radarChart = null, bonusWaterChartInstance = null;
 let lastSyncedFuturesCrop = 'soja';
+
+function updateLocationVisibility() {
+  const isSimple = experienceMode === 'produtor';
+  const hasLoc = Boolean(state.locationSelected);
+
+  const pendingCard = document.getElementById('location-pending-card');
+  if (pendingCard) pendingCard.classList.toggle('hidden', hasLoc);
+
+  const gauges = document.getElementById('farmer-visual-gauges');
+  if (gauges) gauges.classList.toggle('hidden', !isSimple || !hasLoc);
+
+  const wizFooter1 = document.getElementById('wiz-footer-1');
+  if (wizFooter1) wizFooter1.classList.toggle('hidden', !isSimple || !hasLoc);
+
+  const techDiag = document.getElementById('tech-diagnostics-panel');
+  if (techDiag) techDiag.classList.toggle('hidden', isSimple || !hasLoc);
+
+  const histBox = document.getElementById('historical-player-box');
+  if (histBox) histBox.classList.toggle('hidden', isSimple || !hasLoc);
+
+  const ndviBar = document.getElementById('ndvi-controls-bar');
+  if (ndviBar) ndviBar.classList.toggle('hidden', isSimple || !hasLoc);
+}
 
 // ============================================================================
 // AREA UNIT CONVERSION (HECTARES <-> ALQUEIRES)
@@ -59,8 +83,13 @@ function formatArea(haValue) {
 }
 
 function updateAreaDisplay() {
+  const polyAreaEl = document.getElementById('polygon-area');
+  if (!state.locationSelected) {
+    if (polyAreaEl) polyAreaEl.textContent = 'Indique o local';
+    return;
+  }
   const formatted = formatArea(state.areaHa);
-  document.getElementById('polygon-area').textContent = formatted;
+  if (polyAreaEl) polyAreaEl.textContent = formatted;
   const sumEl = document.getElementById('summary-area-text');
   if (sumEl) sumEl.textContent = formatted;
   if (state.scenarios.length) {
@@ -73,8 +102,7 @@ function updateAreaDisplay() {
 // MAP & SATELLITE LAYERS
 // ============================================================================
 function initMap() {
-  const preset = PRESETS[state.regionKey];
-  map = L.map('map', { zoomControl: true }).setView([preset.lat, preset.lon], preset.zoom);
+  map = L.map('map', { zoomControl: true }).setView([-15.78, -50.92], 4);
 
   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     attribution: 'Esri World Imagery',
@@ -85,8 +113,6 @@ function initMap() {
     maxZoom: 19,
     opacity: 0.65
   }).addTo(map);
-
-  drawFieldPolygon(preset.polygon);
 
   map.on('click', function(e) {
     if (drawMode) {
@@ -113,6 +139,9 @@ function initMap() {
         [lat - delta, lon + delta],
         [lat - delta, lon - delta]
       ];
+      state.locationSelected = true;
+      updateLocationVisibility();
+      if (map.getZoom() < 13) map.setView([lat, lon], 14);
       drawFieldPolygon(newPoly);
       updateCoordinatesAndFetchOrbital(lat, lon, newPoly, "Local marcado no mapa");
       showToast("Local atualizado! Analisando terra e clima...", "emerald");
@@ -168,6 +197,8 @@ function finishPolygon() {
   }
   tempMarkers.forEach(m => map.removeLayer(m));
   tempMarkers = [];
+  state.locationSelected = true;
+  updateLocationVisibility();
   drawFieldPolygon(tempVertices);
 
   let sumLat = 0, sumLon = 0;
@@ -192,7 +223,7 @@ function clearNdviMapLayers() {
 }
 
 function renderNdviMapLayer() {
-  if (!map) return;
+  if (!map || !state.locationSelected) return;
   clearNdviMapLayers();
   const modeBadge = document.getElementById('ndvi-layer-mode-badge');
 
@@ -225,7 +256,7 @@ function renderNdviMapLayer() {
 }
 
 function renderOfflineNdviOverlay() {
-  if (!map || !state.ndviLayerEnabled || !state.currentPolygon || state.currentPolygon.length < 3) return;
+  if (!map || !state.locationSelected || !state.ndviLayerEnabled || !state.currentPolygon || state.currentPolygon.length < 3) return;
   clearNdviMapLayers();
   const bounds = L.polygon(state.currentPolygon).getBounds();
   const canvas = document.createElement('canvas');
@@ -268,8 +299,12 @@ function updateNdviOpacity(val) {
 // REGION & LOCATION ACTIONS
 // ============================================================================
 function selectPresetRegion(key) {
+  if (!key || !PRESETS[key]) return;
   state.regionKey = key;
   state.isCustomLocation = false;
+  state.locationSelected = true;
+  updateLocationVisibility();
+
   const preset = PRESETS[key];
   state.locationLabel = preset.name;
   state.lat = preset.lat;
@@ -290,6 +325,7 @@ function selectPresetRegion(key) {
     map.setView([preset.lat, preset.lon], preset.zoom);
     drawFieldPolygon(preset.polygon);
   }
+  setSatellitesLoadingState();
   updateDiagnosticUI();
   updateHistoricalChart();
   runSimulation();
@@ -312,9 +348,11 @@ function updateCoordinatesAndFetchOrbital(lat, lon, polygonLatLngs, label, isCus
   state.lat = lat;
   state.lon = lon;
   state.isCustomLocation = isCustom;
+  state.locationSelected = true;
   state.locationLabel = label;
+  updateLocationVisibility();
   document.getElementById('coords-display').textContent = `Lat: ${lat.toFixed(4)}° | Lon: ${lon.toFixed(4)}°`;
-  if (isCustom) setSatellitesLoadingState();
+  setSatellitesLoadingState();
   fetchNasaPowerClimatology(lat, lon);
   fetchPlanetaryComputerNDVI(polygonLatLngs || state.currentPolygon);
   updateHistoricalChart();
@@ -968,6 +1006,10 @@ function updatePriorityLabels() {
 // WIZARD & EXPERIENCE MODE SWITCHING
 // ============================================================================
 function goToWizardStep(step) {
+  if (step > 1 && !state.locationSelected) {
+    showToast("Primeiro indique onde fica sua propriedade (GPS, região ou toque no mapa).", "amber");
+    return;
+  }
   wizardStep = step;
   if (experienceMode !== 'produtor') return;
 
@@ -1010,14 +1052,10 @@ function setExperienceMode(mode) {
 
   document.getElementById('telemetry-bar').classList.toggle('hidden', isSimple);
   document.getElementById('wizard-nav').classList.toggle('hidden', !isSimple);
-  document.getElementById('farmer-visual-gauges').classList.toggle('hidden', !isSimple);
-  document.getElementById('tech-diagnostics-panel').classList.toggle('hidden', isSimple);
-  document.getElementById('historical-player-box').classList.toggle('hidden', isSimple);
-  document.getElementById('ndvi-controls-bar').classList.toggle('hidden', isSimple);
+  updateLocationVisibility();
 
   document.getElementById('farmer-visual-inputs').classList.toggle('hidden', !isSimple);
   document.getElementById('tech-panel-step2').classList.toggle('hidden', isSimple);
-  document.getElementById('wiz-footer-1').classList.toggle('hidden', !isSimple);
   document.getElementById('wiz-footer-2').classList.toggle('hidden', !isSimple);
 
   document.getElementById('farmer-decision-hub').classList.toggle('hidden', !isSimple);
@@ -1117,6 +1155,8 @@ function useDeviceGPS() {
     (pos) => {
       const lat = pos.coords.latitude, lon = pos.coords.longitude, d = 0.0038;
       const poly = [[lat + d, lon - d], [lat + d, lon + d], [lat - d, lon + d], [lat - d, lon - d]];
+      state.locationSelected = true;
+      updateLocationVisibility();
       map.setView([lat, lon], 14);
       drawFieldPolygon(poly);
       updateCoordinatesAndFetchOrbital(lat, lon, poly, "Minha Propriedade (GPS)");
@@ -1621,10 +1661,6 @@ window.addEventListener('DOMContentLoaded', () => {
   if (typeof L !== 'undefined') initMap();
   setExperienceMode('produtor');
   syncVisualButtonsFromSelects();
-  updateDiagnosticUI();
-  updateHistoricalChart();
-  runSimulation();
-  fetchNasaPowerClimatology(state.lat, state.lon);
-  fetchPlanetaryComputerNDVI(state.currentPolygon);
+  updateAreaDisplay();
   initMarketPanel();
 });
