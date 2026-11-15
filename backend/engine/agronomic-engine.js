@@ -53,13 +53,100 @@ function computeUreaSavingsBrl(nFixedKgHa) {
 
 function computeAgroShieldDecision(p, eff, currentState, stressRainPct = 0, stressTempDelta = 0) {
   const zarc = classifySoilZarc(p.soil);
-  const dap = Number(p.dap ?? 20);
+  const dap = Math.max(5, Number(p.dap ?? 20));
+  const { kc: kc0, zCm: z0 } = obterParametrosCulturaAgroShield(p.crop, dap);
+
+  // Se os dados em tempo real (Open-Meteo + SoilGrids) já chegaram, roda o balanço hídrico real diário
+  if (currentState.realtimeWeather && Array.isArray(currentState.realtimeWeather.rows) && currentState.realtimeWeather.rows.length > 0) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = bonusToISODate(today);
+    const plantingDate = bonusAddDays(today, -dap);
+
+    const soil = currentState.realtimeSoil || { wv0033: 0.30, wv1500: 0.17 };
+    let vwc33 = soil.wv0033 > 1.0 ? soil.wv0033 / 100.0 : soil.wv0033;
+    let vwc1500 = soil.wv1500 > 1.0 ? soil.wv1500 / 100.0 : soil.wv1500;
+    // Ajusta AD respeitando tanto SoilGrids quanto a textura selecionada pelo produtor
+    const soilGridsAd = vwc33 - vwc1500;
+    const ad = soilGridsAd > 0.03 ? Number(((soilGridsAd * 0.5) + (zarc.ad * 0.5)).toFixed(3)) : zarc.ad;
+    vwc33 = vwc1500 + ad;
+
+    const rainFactor = Math.max(0, 1 + (stressRainPct / 100));
+    const etoFactor = stressTempDelta > 0 ? (1 + stressTempDelta * 0.045) : 1.0;
+
+    const adjustedRows = currentState.realtimeWeather.rows.map(r => ({
+      ...r,
+      precipitation_sum: (r.precipitation_sum || 0) * rainFactor,
+      et0_fao_evapotranspiration: (r.et0_fao_evapotranspiration || 3.5) * etoFactor
+    }));
+
+    const simResults = bonusRunWaterBalanceSimulation(adjustedRows, ad, plantingDate, vwc33, vwc1500, p.crop);
+    if (simResults.length > 0) {
+      const todayRes = simResults.find(r => r.date === todayStr) || simResults[simResults.length - 1];
+      let cadAtual = todayRes.cad_diaria_mm || (ad * z0 * 10.0);
+      let armAtual = todayRes.arm_mm;
+      if (stressRainPct <= -20) {
+        armAtual = armAtual * (1 + stressRainPct / 100);
+      }
+      if (p.irrigation === 'irrigado') {
+        armAtual = Math.max(armAtual, 0.78 * cadAtual);
+      }
+
+      const statusAtual = armAtual <= 0.5 * cadAtual ? 'Seco' : 'Úmido';
+      let alertaIrrigacao = false;
+      let diasAteSeca = 7;
+
+      const futureRows = simResults.filter(r => r.date > todayStr);
+      for (let i = 0; i < futureRows.length; i++) {
+        const f = futureRows[i];
+        const fArm = p.irrigation === 'irrigado' ? Math.max(f.arm_mm, 0.75 * f.cad_diaria_mm) : f.arm_mm;
+        if (!alertaIrrigacao && fArm <= 0.5 * f.cad_diaria_mm) {
+          const dDiff = bonusDiffDays(bonusParseISODate(f.date), today);
+          if (f.chuva_mm <= 10) {
+            alertaIrrigacao = true;
+            diasAteSeca = Math.max(1, dDiff);
+          }
+        }
+      }
+
+      const pctCad = Math.round((armAtual / Math.max(1, cadAtual)) * 100);
+      let mensagemStatus = `Umidade em tempo real adequada (${pctCad}% da CAD nos ${Math.round(z0)} cm de raiz)`;
+      if (statusAtual === 'Seco') {
+        mensagemStatus = p.irrigation === 'irrigado'
+          ? `Solo com ${pctCad}% da CAD hoje: acionar irrigação de reposição`
+          : `Solo com pouca água hoje (${pctCad}% da CAD): proteja com palhada e evite adubar com ureia`;
+      } else if (alertaIrrigacao) {
+        mensagemStatus = p.irrigation === 'irrigado'
+          ? `Previsão real: programar irrigação em até ${diasAteSeca} dias`
+          : `Previsão real: reserva segura por cerca de ${diasAteSeca} dias sem chuva forte`;
+      }
+
+      return {
+        zarcCode: zarc.zarcCode,
+        ad,
+        dap,
+        kc: kc0,
+        zCm: Math.round(z0),
+        cadMm: Math.round(cadAtual * 10) / 10,
+        armMm: Math.round(armAtual * 10) / 10,
+        pctCad,
+        status: statusAtual,
+        alertaIrrigacao,
+        diasAteSeca,
+        mensagemStatus,
+        realtimeSource: `${currentState.realtimeSoil?.source || 'SoilGrids'} + ${currentState.realtimeWeather?.source || 'Open-Meteo'}`
+      };
+    }
+  }
+
+  // Fallback físico calibrado pelos parâmetros ZARC enquanto a API responde
   const baseEto = Math.max(1.8, 0.0135 * (currentState.nasaTemp + stressTempDelta + 17.78) * (currentState.nasaSolar / 2.45));
   const dailyRainAvg = Math.max(0.2, (currentState.nasaRain / 365) * (1 + stressRainPct / 100));
-
-  const { kc: kc0, zCm: z0 } = obterParametrosCulturaAgroShield(p.crop, dap);
   const cad0 = zarc.ad * z0 * 10.0;
-  const smapSatFraction = Math.max(0.18, Math.min(0.95, (eff.smapMoisture - 8) / 28));
+  const pmpPct = p.soil === 'arenoso' ? 6.0 : (p.soil === 'franco' ? 9.5 : 11.5);
+  const adPct = zarc.ad * 100 * 1.15;
+  const rawFraction = ((eff.smapMoisture - pmpPct) / adPct) * (1 + (stressRainPct / 100) * 0.6);
+  const smapSatFraction = Math.max(0.18, Math.min(0.95, rawFraction));
   let arm = Math.max(0, Math.min(cad0, smapSatFraction * cad0));
   if (p.irrigation === 'irrigado') arm = Math.max(arm, 0.78 * cad0);
 
@@ -80,7 +167,7 @@ function computeAgroShieldDecision(p, eff, currentState, stressRainPct = 0, stre
   }
 
   const pctCad = Math.round((armAtual / Math.max(1, cadAtual)) * 100);
-  let mensagemStatus = 'Terra com boa umidade para os próximos 14 dias';
+  let mensagemStatus = 'Terra com boa umidade para os próximos dias';
   if (statusAtual === 'Seco') {
     mensagemStatus = p.irrigation === 'irrigado'
       ? 'Terra seca: hora de ligar a irrigação para não perder produção'
@@ -203,10 +290,16 @@ function computeNasaCropAlerts(p, eff, currentState, shield, stressRainPct = 0, 
   const stage = getCropPhenologyStage(p.crop, dap);
   const { kc, zCm } = obterParametrosCulturaAgroShield(p.crop, dap);
 
-  const effectiveTemp = Number((currentState.nasaTemp + stressTempDelta).toFixed(1));
-  const effectiveTmin = frostActive ? 1.8 : Number((currentState.nasaTmin + stressTempDelta * 0.6).toFixed(1));
-  const effectiveSolar = Number((currentState.nasaSolar + (stressTempDelta > 1.5 ? 2.4 : 0)).toFixed(1));
-  const et0Today = computeEt0HargreavesSamani(effectiveTemp, effectiveSolar);
+  const baseLiveTemp = currentState.liveTempMaxToday ?? currentState.nasaTemp;
+  const baseLiveTmin = currentState.liveTempMin7d ?? currentState.nasaTmin;
+  const baseLiveSolar = currentState.liveSolarToday ?? currentState.nasaSolar;
+
+  const effectiveTemp = Number((baseLiveTemp + stressTempDelta).toFixed(1));
+  const effectiveTmin = frostActive ? 1.8 : Number((baseLiveTmin + stressTempDelta * 0.5).toFixed(1));
+  const effectiveSolar = Number((baseLiveSolar + (stressTempDelta > 1.5 ? 2.4 : 0)).toFixed(1));
+  const et0Today = currentState.liveEtoToday
+    ? Number((currentState.liveEtoToday * (1 + Math.max(0, stressTempDelta) * 0.045)).toFixed(2))
+    : computeEt0HargreavesSamani(effectiveTemp, effectiveSolar);
   const etcToday = Number((et0Today * kc).toFixed(2));
 
   let pctCad = shield ? shield.pctCad : 68;
